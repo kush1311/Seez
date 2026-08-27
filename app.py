@@ -13,6 +13,13 @@ import streamlit as st
 BASE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE_DIR))
 
+# Streamlit reloads this file on each rerun but leaves imported modules in
+# sys.modules for the life of the process, so edits under seezar_operator/ would
+# otherwise keep running until the server was restarted. Dropping them here
+# forces the imports below to pick up whatever is on disk now.
+for _stale in [n for n in sys.modules if n == "seezar_operator" or n.startswith("seezar_operator.")]:
+    del sys.modules[_stale]
+
 from seezar_operator.config import OPENROUTER_MODEL, REPORTS_DIR
 from seezar_operator.dashboard import Dashboard
 from seezar_operator.scenarios import scenario_2, scenario_3
