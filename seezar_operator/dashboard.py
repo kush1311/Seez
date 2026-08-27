@@ -218,28 +218,61 @@ class Dashboard:
         if len(nodes) > max_chats:
             logger.warning("Reading the first %d of %d chats (--max-chats)", max_chats, len(nodes))
 
+        by_ref = {n["chatReferenceId"]: n["userId"] for n in nodes
+                  if n.get("chatReferenceId") and n.get("userId")}
         chats: List[dict] = []
-        for node in nodes[:max_chats]:
-            ref, user_id = node.get("chatReferenceId"), node.get("userId")
-            if not ref or not user_id:
-                continue
+        seen: set = set()
+        page = 1
+
+        # The list renders 20 rows per page while the query returns every chat,
+        # so rows beyond the current page are absent from the DOM until paged to.
+        while len(chats) < max_chats:
+            rendered = self.page.inner_text("body")
+            on_page = [r for r in by_ref if r not in seen and r in rendered]
+            for ref in on_page:
+                if len(chats) >= max_chats:
+                    break
+                seen.add(ref)
+                chats.append(self._read_chat(ref, by_ref[ref]))
+            if len(chats) >= max_chats or not self._next_chat_page(page):
+                break
+            page += 1
+
+        return [c for c in chats if c], len(nodes)
+
+    def _read_chat(self, ref: str, user_id: str) -> Optional[dict]:
+        try:
+            self.page.get_by_text(ref, exact=False).first.click(timeout=15_000)
+        except Exception as exc:
+            logger.warning("Could not open chat %s: %s", ref, str(exc).splitlines()[0])
+            return None
+        data = self._wait_for("getUserChatHistory", CAPTURE_TIMEOUT_MS, userId=user_id)
+        texts = []
+        for item in ((data or {}).get("getUserChatHistory") or {}).get("chatHistory") or []:
             try:
-                self.page.get_by_text(ref, exact=False).first.click(timeout=15_000)
-            except Exception as exc:
-                logger.warning("Could not open chat %s: %s", ref, str(exc).splitlines()[0])
+                payload = json.loads(item.get("contentJson") or "{}")
+            except (TypeError, ValueError):
                 continue
-            data = self._wait_for("getUserChatHistory", CAPTURE_TIMEOUT_MS, userId=user_id)
-            texts = []
-            for item in ((data or {}).get("getUserChatHistory") or {}).get("chatHistory") or []:
-                try:
-                    payload = json.loads(item.get("contentJson") or "{}")
-                except (TypeError, ValueError):
-                    continue
-                if payload.get("role") == "user" and payload.get("text"):
-                    texts.append(str(payload["text"]).strip())
-            chats.append({"chat_ref": ref, "user_messages": texts})
-            logger.info("  chat %s -> %d customer messages", ref, len(texts))
-        return chats, len(nodes)
+            if payload.get("role") == "user" and payload.get("text"):
+                texts.append(str(payload["text"]).strip())
+        logger.info("  chat %s -> %d customer messages", ref, len(texts))
+        return {"chat_ref": ref, "user_messages": texts}
+
+    def _next_chat_page(self, current: int) -> bool:
+        controls = self.page.locator(".paginationControls").first
+        if not controls.count():
+            return False
+        target = controls.get_by_text(str(current + 1), exact=True)
+        if not target.count():
+            return False
+        try:
+            target.first.click(timeout=15_000)
+        except Exception as exc:
+            logger.warning("Could not open chat page %d: %s", current + 1, str(exc).splitlines()[0])
+            return False
+        self.page.wait_for_timeout(6000)
+        logger.info("Advanced to chat list page %d", current + 1)
+        return True
 
     def bot_metrics(self, name: str) -> Tuple[dict, str]:
         """Analytics payload plus the bot it actually describes.
