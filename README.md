@@ -83,7 +83,7 @@ seezar_operator/
   scenarios/scenario_3.py    deep-dive explorer
   utils/otp_fetcher.py       one-time-code retrieval over IMAP
 eval/gold_labels.json        annotated evaluation set
-tests/                       42 tests
+tests/                       43 tests
 ```
 
 ### Data acquisition
