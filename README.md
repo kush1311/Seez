@@ -146,4 +146,6 @@ The suite requires no browser, network access or credentials, and runs in CI on 
 
 ## Reproducibility
 
-Dependencies are pinned to exact versions. Scenario III reads chats in the order the Conversations tab lists them and the model is called at `temperature: 0`, so repeated runs over unchanged data produce identical figures.
+Dependencies are pinned to exact versions. Scenario III reads chats in the order the Conversations tab lists them, so the input to classification is stable, and the model is called at `temperature: 0`.
+
+Figures read from the dashboard - row counts, chat counts, mention counts and the messages-per-chat ratio - are exact and repeat identically. Topic shares do not: the provider does not guarantee identical output for identical input, and accuracy on the annotated set has varied by several points across runs on the same data. Treat topic distributions as approximate. Where a batch returns fewer labels than messages sent, the missing ones are re-requested and any that remain unanswered are logged and counted as `other`.

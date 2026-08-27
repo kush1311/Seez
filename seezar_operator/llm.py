@@ -111,21 +111,43 @@ def _parse_array(content: str) -> List[dict]:
 
 def analyse(messages: List[str]) -> List[Dict]:
     results: List[Dict] = [
-        {"message": m, "topic": "other", "models": []} for m in messages
+        {"message": m, "topic": None, "models": []} for m in messages
     ]
     valid = set(TOPICS)
     starts = list(range(0, len(messages), BATCH_SIZE))
 
-    def classify(start: int):
-        chunk = messages[start:start + BATCH_SIZE]
+    def _ask(chunk: List[str]) -> List[dict]:
         numbered = "\n".join(
             "%d: %s" % (i, m.replace("\n", " ")[:400]) for i, m in enumerate(chunk)
         )
-        content = _post([
+        return _parse_array(_post([
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": numbered},
-        ])
-        return start, len(chunk), _parse_array(content)
+        ]))
+
+    def classify(start: int):
+        chunk = messages[start:start + BATCH_SIZE]
+        items = _ask(chunk)
+        covered = {int(i["i"]) for i in items
+                   if str(i.get("i", "")).lstrip("-").isdigit() and 0 <= int(i["i"]) < len(chunk)}
+
+        # A short reply would otherwise leave those messages on their "other"
+        # default, which reads as a classification rather than a missing answer.
+        missing = [i for i in range(len(chunk)) if i not in covered]
+        if missing:
+            logger.warning("Batch at %d returned %d/%d labels; retrying %d message(s)",
+                           start, len(covered), len(chunk), len(missing))
+            retry = _ask([chunk[i] for i in missing])
+            for item in retry:
+                try:
+                    local = int(item["i"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if 0 <= local < len(missing):
+                    item["i"] = missing[local]
+                    items.append(item)
+
+        return start, len(chunk), items
 
     logger.info("Classifying %d messages in %d batches (%d workers)",
                 len(messages), len(starts), MAX_WORKERS)
@@ -149,4 +171,12 @@ def analyse(messages: List[str]) -> List[Dict]:
                 )
             done += 1
             logger.info("  batch %d/%d complete", done, len(starts))
+
+    unlabelled = sum(1 for r in results if r["topic"] is None)
+    if unlabelled:
+        logger.warning("%d of %d messages could not be classified and are counted "
+                       "as 'other'", unlabelled, len(messages))
+    for r in results:
+        if r["topic"] is None:
+            r["topic"] = "other"
     return results

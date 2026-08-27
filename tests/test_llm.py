@@ -52,23 +52,51 @@ def test_analyse_aligns_results_and_rejects_bad_labels():
     assert out[1]["topic"] == "other", "an invented label must fall back to 'other'"
 
 
-def test_analyse_defaults_messages_a_batch_omitted():
-    """A short reply must not shift labels onto the wrong messages."""
-    with patch.object(llm, "_post", return_value='[{"i":2,"topic":"service","models":[]}]'):
-        out = analyse(["m0", "m1", "m2"])
-    assert [o["topic"] for o in out] == ["other", "other", "service"]
-    assert [o["message"] for o in out] == ["m0", "m1", "m2"]
+def test_a_short_batch_is_retried_and_filled():
+    """A reply missing labels must be re-asked, not left on the default."""
+    calls = []
+
+    def fake_post(messages):
+        calls.append(messages[-1]["content"])
+        if len(calls) == 1:
+            return '[{"i":0,"topic":"service","models":[]}]'      # 1 of 3
+        return ('[{"i":0,"topic":"location","models":[]},'
+                '{"i":1,"topic":"test_drive","models":[]}]')      # the 2 missing
+
+    with patch.object(llm, "_post", side_effect=fake_post):
+        out = llm.analyse(["a", "b", "c"])
+
+    assert len(calls) == 2, "the missing messages must be re-asked"
+    assert [o["topic"] for o in out] == ["service", "location", "test_drive"]
+    assert all(o["topic"] != "other" for o in out), "nothing should fall back to 'other'"
+
+
+def test_still_unlabelled_after_retry_becomes_other():
+    """When the retry also comes back empty, the message is counted as other."""
+    calls = []
+
+    def fake_post(messages):
+        calls.append(1)
+        return '[{"i":0,"topic":"service","models":[]}]' if len(calls) == 1 else "[]"
+
+    with patch.object(llm, "_post", side_effect=fake_post):
+        out = llm.analyse(["a", "b"])
+
+    assert len(calls) == 2, "a short reply must still trigger one retry"
+    assert out[0]["topic"] == "service"
+    assert out[1]["topic"] == "other", "an answer that never arrives is counted as other"
 
 
 def test_batch_offsets_are_applied():
-    """With 2 batches, batch-relative index 0 must map to the right global message."""
+    """With 2 batches, batch-relative indices must map onto the right messages."""
     original = llm.BATCH_SIZE
     llm.BATCH_SIZE = 2
+    payload = ('[{"i":0,"topic":"location","models":[]},'
+               '{"i":1,"topic":"service","models":[]}]')
     try:
-        with patch.object(llm, "_post", return_value='[{"i":0,"topic":"location","models":[]}]'):
-            out = analyse(["a", "b", "c", "d"])
+        with patch.object(llm, "_post", return_value=payload):
+            out = llm.analyse(["a", "b", "c", "d"])
     finally:
         llm.BATCH_SIZE = original
-    assert out[0]["topic"] == "location"
-    assert out[2]["topic"] == "location"
-    assert out[1]["topic"] == "other" and out[3]["topic"] == "other"
+    assert [o["topic"] for o in out] == ["location", "service", "location", "service"]
+    assert [o["message"] for o in out] == ["a", "b", "c", "d"]
