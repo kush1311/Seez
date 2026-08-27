@@ -65,6 +65,10 @@ A Streamlit interface exposes the same operations:
 streamlit run app.py
 ```
 
+Streamlit reloads `app.py` on each interaction but not the imported `seezar_operator`
+modules, which are held in `sys.modules` for the life of the process. Restart the
+server after editing anything outside `app.py`.
+
 ## Architecture
 
 ```
