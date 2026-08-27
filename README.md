@@ -1,14 +1,42 @@
 # Seezar Autonomous Operator
 
-An autonomous operator for the [Seezar Dashboard](https://seezar-dashboard.seez.dev), covering Scenario II (Chat History ratio) and Scenario III (Deep-Dive Explorer).
+An autonomous browser operator for the [Seezar Dashboard](https://seezar-dashboard.seez.dev). It signs in, navigates to a dealership, and produces two reports: the ratio of chat messages to conversations (Scenario II) and an analysis of vehicle interest and discussion topics (Scenario III).
 
-## Setup
+## Requirements
+
+- Python 3.13
+- A Seezar Dashboard account
+- A Gmail account with an app password, for automated one-time-code retrieval
+- An OpenRouter API key
+
+## Installation
 
 ```bash
 pip install -r requirements.txt
 playwright install chromium
-cp .env.example .env      # then fill in credentials
+cp .env.example .env
 ```
+
+## Configuration
+
+Settings are read from `.env`.
+
+| Variable | Required | Default |
+| --- | --- | --- |
+| `SEEZAR_EMAIL` | yes | |
+| `SEEZAR_PASSWORD` | yes | |
+| `GMAIL_USER` | yes | |
+| `GMAIL_APP_PASSWORD` | yes | |
+| `OPENROUTER_API_KEY` | Scenario III only | |
+| `OPENROUTER_MODEL` | no | `deepseek/deepseek-v4-flash-0731` |
+| `SEEZAR_DASHBOARD_URL` | no | `https://seezar-dashboard.seez.dev` |
+| `HEADLESS_BROWSER` | no | `false` |
+| `CAPTURE_TIMEOUT_MS` | no | `75000` |
+| `CAPTURE_ATTEMPTS` | no | `3` |
+| `DOWNLOAD_TIMEOUT_MS` | no | `300000` |
+| `DOWNLOAD_ATTEMPTS` | no | `2` |
+
+The authenticated session is cached in `downloads/storage_state.json`. A full sign-in, including one-time-code retrieval over IMAP, runs only when that session expires.
 
 ## Usage
 
@@ -16,59 +44,67 @@ cp .env.example .env      # then fill in credentials
 python main.py --list                      # dealerships with an active bot
 python main.py -s 2 -d "Ejner Hessel"      # Scenario II
 python main.py -s 3 -d "Ejner Hessel"      # Scenario III
-python main.py -s all -d "Norton Way"      # both, any dealership
-streamlit run app.py                       # web UI
-python evaluate.py --save                  # classifier accuracy
-python -m pytest tests/ -q                 # 39 tests, offline
+python main.py -s all -d "Norton Way"      # both
 ```
 
-| Flag | Default | Purpose |
+| Flag | Default | Description |
 | --- | --- | --- |
+| `-s`, `--scenario` | `all` | `2`, `3` or `all` |
+| `-d`, `--dealership` | `Ejner Hessel` | Matched case-insensitively against the live sidebar |
+| `--list` | | List dealerships with an active bot and exit |
 | `--headless` | off | Run without a visible browser window |
-| `--max-messages` | 200 | Messages sent to the LLM in Scenario III |
-| `--max-chats` | 25 | Chats opened in the Conversations tab |
-| `-v` | off | Debug logging |
+| `--max-messages` | `200` | Messages classified in Scenario III |
+| `--max-chats` | `25` | Chats opened in the Conversations tab |
+| `-v`, `--verbose` | off | Debug logging |
 
-Reports are written to `reports/`, timestamped per dealership.
+Reports are written to `reports/` as Markdown, named per dealership and timestamped.
+
+A Streamlit interface exposes the same operations:
+
+```bash
+streamlit run app.py
+```
 
 ## Architecture
 
 ```
-main.py                      CLI
-app.py                       Streamlit UI
-evaluate.py                  classifier accuracy against hand labels
+main.py                      command-line interface
+app.py                       Streamlit interface
+evaluate.py                  classifier evaluation harness
 seezar_operator/
   config.py                  environment-driven settings
-  dashboard.py               Playwright navigation, GraphQL capture
-  chat_data.py               chat-history zip and CSV parsing
+  dashboard.py               browser control and GraphQL response capture
+  chat_data.py               chat-history archive parsing
   llm.py                     OpenRouter client
-  report.py                  terminal tables and Markdown export
+  report.py                  terminal tables and Markdown output
   scenarios/scenario_2.py    messages per chat
   scenarios/scenario_3.py    deep-dive explorer
-  utils/otp_fetcher.py       Gmail IMAP one-time-code reader
-eval/gold_labels.json        60 hand-labelled messages
-tests/                       39 tests
+  utils/otp_fetcher.py       one-time-code retrieval over IMAP
+eval/gold_labels.json        annotated evaluation set
+tests/                       unit tests
 ```
 
-### Navigate the UI, read the network
+### Data acquisition
 
-The operator drives the dashboard as a person would, but the analytics charts are rendered to `<canvas>` and carry no readable text. Rather than OCR a chart or scrape the DOM, `dashboard.py` captures the GraphQL responses the page already makes and reads the exact `botMetrics` payload.
+The dashboard renders its analytics charts to `<canvas>`, so the underlying values are not present in the DOM. The operator navigates the interface with Playwright and concurrently records the GraphQL responses the application issues, reading values from the `botMetrics` payload. Conversation content is obtained the same way, from `seezarChats` and `getUserChatHistory` as each chat is opened.
 
-### Nothing is hardcoded
+### Identifier resolution
 
-Dealership IDs, bot IDs and the dealership list are discovered at runtime from `getDealerships`: 316 dealerships with active bots. `--dealership` is matched case-insensitively against the live sidebar.
+Dealership identifiers, bot identifiers and the dealership list are resolved at runtime from the `getDealerships` query, which returns 316 dealerships with an active bot. Dealership names supplied on the command line are matched case-insensitively, with ambiguous matches rejected.
 
-### The right bot, not the first one
+### Bot selection
 
-Ejner Hessel hosts an internal HR assistant (`527`) and the customer-facing Seezar bot (`526`). The Conversations tab lists 24 chats for the first and 101 for the second, so `bots[0]` analyses the wrong population. The operator reads each bot's `botType` and prefers `seezar`. Analytics is served for `527` only, and `/analytics/526` redirects to it, so each report records which bot its figures describe.
+A dealership may host multiple bots. Ejner Hessel has an internal support assistant (`527`) and a customer-facing bot (`526`), whose Conversations tabs contain 24 and 101 chats respectively. The operator reads each bot's `botType` from `queryDealershipById` and selects the customer-facing one. Analytics is served only for `527`, and `/analytics/526` redirects to it, so each report records the bot its figures describe.
 
-### The LLM never produces a number
+### Metric derivation
 
-It assigns a topic label and extracts vehicle names from message text. Every count, share and ratio is computed in Python from those labels.
+The language model assigns a topic label to each message and extracts any vehicle names it contains. All counts, shares and ratios are computed from those labels in Python.
 
 ## Scenario II: messages per chat
 
-Clicks Chat History, unzips the export, parses it, and divides total rows by unique `Chat Ref` values.
+The operator downloads the Chat History archive, parses the CSV files it contains, and divides the total row count by the number of distinct `Chat Ref` values.
+
+Result for Ejner Hessel:
 
 ```
 Total message rows   901
@@ -76,19 +112,19 @@ Unique Chat Refs     116
 Messages per chat    7.77
 ```
 
-Three properties of the export, all covered by `tests/test_chat_data.py`:
+The archive has three properties that affect parsing, covered by `tests/test_chat_data.py`:
 
-- UTF-8 with BOM, so the first column name is corrupted unless read as `utf-8-sig`.
-- Messages contain embedded newlines: 2,719 physical lines but 901 rows. Counting lines gives roughly 23 messages per chat, three times the true figure.
-- A dealership group ships one CSV per franchise. The Norton Way export holds `Norton Way.csv`, `Norton Way Peugeot.csv` and `Norton Way Citroen.csv`; reading only the first reports 4 rows across 1 chat, against a true 1,040 rows across 178 chats.
+- It is UTF-8 with a byte-order mark, which corrupts the first column name unless read as `utf-8-sig`.
+- Message text contains embedded newlines. The Ejner Hessel file has 2,719 physical lines and 901 rows; counting lines yields approximately 23 messages per chat against a true 7.77.
+- A dealership group ships one file per franchise. The Norton Way archive contains `Norton Way.csv`, `Norton Way Peugeot.csv` and `Norton Way Citroen.csv`, totalling 1,040 rows across 178 chats.
 
-The export covers the dealership's full history while the dashboard's own figure is scoped to the selected date range, so the two are reported separately.
+The archive covers a dealership's full history, whereas the dashboard's own messages-per-chat figure is scoped to the selected date range. The two are reported separately.
 
 ## Scenario III: deep-dive explorer
 
-Reads the analytics vehicle figures, opens the Conversations tab and reads each chat, then analyses the full export.
+The operator reads the analytics vehicle figures, opens the Conversations tab and reads each chat, then classifies messages from the full export.
 
-How many users mentioned the most-clicked model:
+Mentions of the most-clicked model:
 
 | Measure | Value |
 | --- | --- |
@@ -97,7 +133,7 @@ How many users mentioned the most-clicked model:
 | Chats mentioning `Toyota Camry` | 0 |
 | Mentions across the full export (447 messages) | 0 |
 
-Which models get the most interest:
+Vehicle interest by source:
 
 | Source | Result |
 | --- | --- |
@@ -105,51 +141,38 @@ Which models get the most interest:
 | Analytics `mostQueried` | Chevrolet Captiva |
 | Customer conversations | Mercedes, Porsche, Ford Mondeo, Xpeng G9, Audi |
 
-Two contradictions are flagged automatically:
+Two inconsistencies in the source data are reported rather than reconciled:
 
-1. `mostQueried` reports Chevrolet Captiva while the API's own `vehicleInsights` ranks Toyota Camry highest at 60 clicks; Captiva does not appear in the data.
-2. No model named in Analytics appears in any customer message, so the two sources are reported separately rather than merged.
+1. `mostQueried` returns Chevrolet Captiva, while `vehicleInsights` in the same payload ranks Toyota Camry highest at 60 clicks. Chevrolet Captiva does not appear in `vehicleInsights`.
+2. No vehicle named in the analytics payload appears in any customer message, so the two sources are presented independently.
 
-Topics are reported over all messages and, separately, over only those naming a vehicle.
+Topic distribution is reported over all sampled messages and over the subset that names a vehicle.
 
-### Why an LLM
+Classification is performed by a language model because the conversations mix Danish and English: `"Kan jeg bytte min gamle bil ind?"` is a trade-in enquiry, and `"Hvad koster den om maneden med udbetaling?"` concerns financing rather than pricing. Neither is reachable by English keyword matching.
 
-The conversations mix Danish and English. `"Kan jeg bytte min gamle bil ind?"` is a trade-in enquiry and `"Hvad koster den om maneden med udbetaling?"` is financing rather than pricing; both are invisible to an English keyword list.
+The brief describes clicking the most-clicked model. That element is an `H2` heading with `cursor: auto` and no click handler, so the value is read from the analytics payload instead.
 
-The operator does not click the most-clicked model because that element is a heading rather than a control: `H2`, `cursor: auto`, no click handler.
+## Evaluation
 
-## Classifier evaluation
-
-`eval/gold_labels.json` holds 60 messages sampled from the live export and labelled by hand.
+`eval/gold_labels.json` contains 60 messages drawn from the live export and annotated by hand. `python evaluate.py --save` classifies them and reports accuracy, macro F1, per-class precision and recall, and every disagreement.
 
 | Taxonomy | Accuracy | Macro F1 |
 | --- | --- | --- |
-| Original | 71.7% (43/60) | 0.792 |
+| Initial | 71.7% (43/60) | 0.792 |
 | With `parts_merchandise` | 95.0% (57/60) | 0.855 |
 
-The first run put `inventory` at precision 1.00 and recall 0.46: the model was never wrong when it said inventory, but it would not file a branded t-shirt, a key cover or a set of tyres under it. In a car dealership inventory means vehicles, and 13 of the 17 errors were that one distinction, so the taxonomy was wrong rather than the model. `parts_merchandise` now scores 1.00 precision and recall over 17 messages.
+Under the initial taxonomy, `inventory` scored 1.00 precision and 0.46 recall: the model did not classify accessories and branded goods as vehicle inventory. Thirteen of seventeen errors were that distinction. Adding a `parts_merchandise` label resolved it; the class now scores 1.00 precision and recall over 17 messages. Accessories and merchandise account for a substantial share of this dealership's traffic, and roughly one message in five requests a human agent.
 
-That is also a business finding: a large share of this dealership's chat traffic concerns parts and merchandise rather than cars. Separately, one message in five is a request to speak to a human.
+These figures measure agreement between the model and a single annotator. On 60 examples the 95% confidence interval around 95% is approximately 86-99%. Macro F1 is averaged only over classes present in the annotated set; `financing` (support 1) and `specs` (support 2) are too small to yield a stable per-class score.
 
-These figures measure agreement between the model and a single annotator, not objective truth. On 60 examples the 95% confidence interval around 95% is roughly 86-99%, so the result should not be read to one decimal place. Macro F1 averages only over classes present in the gold set. `financing` (support 1) and `specs` (support 2) are too small for a stable per-class score.
+## Testing
 
-## Configuration
-
-`.env`, see `.env.example`:
-
-```ini
-SEEZAR_EMAIL=
-SEEZAR_PASSWORD=
-GMAIL_USER=
-GMAIL_APP_PASSWORD=
-OPENROUTER_API_KEY=
-OPENROUTER_MODEL=deepseek/deepseek-v4-flash-0731
+```bash
+python -m pytest tests/ -q
 ```
 
-Timeouts are environment-overridable: `CAPTURE_TIMEOUT_MS`, `CAPTURE_ATTEMPTS`, `DOWNLOAD_TIMEOUT_MS`, `DOWNLOAD_ATTEMPTS`.
-
-The session is cached in `downloads/storage_state.json`; login with a Gmail-retrieved one-time code runs only when it expires.
+39 tests. The suite requires no browser, network access or credentials, and runs in CI on every push.
 
 ## Reproducibility
 
-Dependencies are pinned exactly; tested on Python 3.13. The Scenario III sample is drawn with a fixed seed and the model runs at `temperature: 0`, so repeat runs produce the same figures. The test suite is offline and runs in CI on every push.
+Dependencies are pinned to exact versions. The Scenario III message sample is drawn with a fixed seed and the model is called at `temperature: 0`, so repeated runs over unchanged data produce identical figures.
