@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import logging
-import random
 import re
 from collections import Counter
 from typing import List, Optional
 
 from seezar_operator import llm, report
-from seezar_operator.chat_data import customer_messages, load_export
 from seezar_operator.dashboard import Dashboard
 
 logger = logging.getLogger("seezar.scenario3")
 
 MAX_MESSAGES = 200
 MAX_CHATS = 25
-SAMPLE_SEED = 42
 
 
 def _vehicle_insights(metrics: dict) -> tuple:
@@ -51,7 +48,6 @@ def run(dealership: str, dash: Optional[Dashboard] = None,
     try:
         metrics, analytics_bot = dash.bot_metrics(dealership)
         chats, chats_listed = dash.conversations(dealership, max_chats=max_chats)
-        zip_path = dash.download_chat_history(dealership)
     finally:
         if own:
             dash.close()
@@ -59,18 +55,13 @@ def run(dealership: str, dash: Optional[Dashboard] = None,
     most_queried, analytics_models = _vehicle_insights(metrics)
     top_model = _top_model(most_queried, analytics_models)
 
-    # Conversations tab: how many of those users mentioned the top model.
-    chats_with_model = [
-        c for c in chats if _mentions(top_model, c["user_messages"]) > 0
-    ]
+    chats_with_model = [c for c in chats if _mentions(top_model, c["user_messages"]) > 0]
 
-    df = load_export(zip_path)
-    msgs = customer_messages(df)
-    # Random, seeded: msgs[:n] would sample only the oldest conversations and
-    # every share below would describe those rather than the dealership.
-    sampled = (msgs if len(msgs) <= max_messages
-               else random.Random(SAMPLE_SEED).sample(msgs, max_messages))
-    logger.info("Analysing %d of %d customer messages", len(sampled), len(msgs))
+    messages = [m for c in chats for m in c["user_messages"]]
+    sampled = messages[:max_messages]
+    logger.info("Analysing %d customer messages from %d chats", len(sampled), len(chats))
+    if not sampled:
+        raise RuntimeError("No customer messages found in the Conversations tab for %s" % dealership)
 
     records = llm.analyse(sampled)
 
@@ -107,11 +98,10 @@ def run(dealership: str, dash: Optional[Dashboard] = None,
         "analytics_most_queried": most_queried,
         "analytics_models": analytics_models,
         "chats_listed": chats_listed,
-        "chats_reviewed": len(chats),
+        "chats_read": len(chats),
         "chats_mentioning_top_model": len(chats_with_model),
-        "export_mentions_top_model": _mentions(top_model, msgs),
+        "messages_total": len(messages),
         "messages_analysed": len(sampled),
-        "messages_total": len(msgs),
         "topic_counts": dict(topic_counts.most_common()),
         "around_topic_counts": dict(around_topics.most_common()),
         "model_counts": dict(model_counts.most_common(15)),
@@ -130,13 +120,12 @@ def run(dealership: str, dash: Optional[Dashboard] = None,
         ["Measure", "Value"],
         [
             ["Chats listed in Conversations tab", chats_listed],
-            ["Chats actually opened and read", len(chats)],
+            ["Chats opened and read", len(chats)],
+            ["Customer messages in those chats", len(messages)],
             ["Chats mentioning this model", len(chats_with_model)],
-            ["Mentions across the full export (%d messages)" % len(msgs),
-             result["export_mentions_top_model"]],
         ],
     )
-    report.table("Conversations - models customers actually mentioned (%d messages)" % len(sampled),
+    report.table("Models customers mentioned (%d messages)" % len(sampled),
                  ["Model", "Mentions"],
                  list(model_counts.most_common(10)) or [["(none found)", "-"]])
     report.table("What customers discuss - all messages", ["Topic", "Messages", "Share"],
@@ -157,31 +146,28 @@ def run(dealership: str, dash: Optional[Dashboard] = None,
           "**Dealership:** %s  " % dealership,
           "**Most-clicked model (Analytics):** %s  " % top_model,
           "**Analytics served for bot:** `%s`  " % analytics_bot,
-          "**Messages analysed:** %d of %d, random sample (seed %d)  "
-          % (len(sampled), len(msgs), SAMPLE_SEED),
+          "**Source:** Conversations tab, %d of %d chats read  " % (len(chats), chats_listed),
           "**Topic model:** `%s` via OpenRouter" % llm.OPENROUTER_MODEL, "",
           "## How many users mentioned this model", "",
           report.md_table(
               ["Measure", "Value"],
               [["Chats listed in the Conversations tab", chats_listed],
                ["Chats opened and read", len(chats)],
-               ["Chats mentioning `%s`" % top_model, len(chats_with_model)],
-               ["Mentions across the full export (%d messages)" % len(msgs),
-                result["export_mentions_top_model"]]],
+               ["Customer messages in those chats", len(messages)],
+               ["Chats mentioning `%s`" % top_model, len(chats_with_model)]],
           ), ""]
     if len(chats_with_model) == 0:
-        md += ["> No user in the Conversations tab mentioned `%s`, and it does not "
-               "appear anywhere in the %d-message export either." % (top_model, len(msgs)), ""]
+        md += ["> No user in the %d chats read mentioned `%s`." % (len(chats), top_model), ""]
     md += ["## Which car models get the most interest", "",
            "### Reported by Analytics", "",
            report.md_table(["Model", "Clicks"], analytics_models or [["(none reported)", "-"]]), ""]
     if discrepancy:
         md += ["> **Data inconsistency.** %s" % discrepancy, ""]
-    md += ["### Mentioned by customers in conversations", "",
+    md += ["### Mentioned by customers in the Conversations tab", "",
            report.md_table(["Model", "Mentions"],
                            list(model_counts.most_common(15)) or [["(none found)", "-"]]), "",
            "## What people discuss", "",
-           "**All sampled messages**", "",
+           "**All %d messages read**" % len(sampled), "",
            report.md_table(["Topic", "Messages", "Share"],
                            [[t, c, "%.1f%%" % (100.0 * c / len(sampled))]
                             for t, c in topic_counts.most_common()]), ""]
@@ -195,12 +181,12 @@ def run(dealership: str, dash: Optional[Dashboard] = None,
            % (", ".join(overlap) if overlap else "**none**"), ""]
     if not overlap:
         md += ["> The Analytics vehicle widget names models that never appear in the",
-               "> conversation export, so the two data sources do not corroborate",
-               "> each other. Figures from each source are reported separately rather",
-               "> than merged.", ""]
+               "> conversations read, so the two data sources do not corroborate each",
+               "> other. Figures from each source are reported separately rather than",
+               "> merged.", ""]
     md += ["---", "",
-           "Topic labels and model mentions are produced by the LLM from raw message",
-           "text (Danish and English). All counts are computed in code from those",
-           "labels - no figure in this report is generated by the model.", ""]
+           "All conversation figures come from the Conversations tab. Topic labels and",
+           "model mentions are produced by the LLM from raw message text (Danish and",
+           "English); all counts are computed in code from those labels.", ""]
     report.save("scenario_3_deep_dive", "\n".join(md), dealership)
     return result

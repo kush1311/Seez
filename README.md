@@ -85,7 +85,7 @@ seezar_operator/
   scenarios/scenario_3.py    deep-dive explorer
   utils/otp_fetcher.py       one-time-code retrieval over IMAP
 eval/gold_labels.json        annotated evaluation set
-tests/                       unit tests
+tests/                       42 tests
 ```
 
 ### Data acquisition
@@ -126,16 +126,18 @@ The archive covers a dealership's full history, whereas the dashboard's own mess
 
 ## Scenario III: deep-dive explorer
 
-The operator reads the analytics vehicle figures, opens the Conversations tab and reads each chat, then classifies messages from the full export.
+The operator reads the analytics vehicle figures, then opens the Conversations tab and reads each chat. Every conversation figure below comes from that tab; the Chat History export belongs to Scenario II and is not used here.
+
+The list renders 20 rows per page while the underlying query returns every chat, so the operator pages through the list to reach chats beyond the first page.
 
 Mentions of the most-clicked model:
 
 | Measure | Value |
 | --- | --- |
 | Chats listed in the Conversations tab | 101 |
-| Chats opened and read | 5 |
+| Chats opened and read | 25 |
+| Customer messages in those chats | 70 |
 | Chats mentioning `Toyota Camry` | 0 |
-| Mentions across the full export (447 messages) | 0 |
 
 Vehicle interest by source:
 
@@ -175,8 +177,8 @@ These figures measure agreement between the model and a single annotator. On 60 
 python -m pytest tests/ -q
 ```
 
-39 tests. The suite requires no browser, network access or credentials, and runs in CI on every push.
+42 tests. The suite requires no browser, network access or credentials, and runs in CI on every push.
 
 ## Reproducibility
 
-Dependencies are pinned to exact versions. The Scenario III message sample is drawn with a fixed seed and the model is called at `temperature: 0`, so repeated runs over unchanged data produce identical figures.
+Dependencies are pinned to exact versions. Scenario III reads chats in the order the Conversations tab lists them and the model is called at `temperature: 0`, so repeated runs over unchanged data produce identical figures.

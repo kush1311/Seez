@@ -3,12 +3,11 @@ from __future__ import annotations
 import io
 import zipfile
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 
 import pandas as pd
 
 REF_COL = "Chat Ref"
-ROLE_COL = "User/Assistant"
 MSG_COL = "Message"
 
 
@@ -44,12 +43,3 @@ def messages_per_chat(df: pd.DataFrame) -> Dict[str, float]:
         "unique_chat_refs": unique_refs,
         "messages_per_chat": round(total_rows / unique_refs, 2),
     }
-
-
-def customer_messages(df: pd.DataFrame) -> List[str]:
-    if ROLE_COL in df.columns:
-        mask = df[ROLE_COL].astype(str).str.strip().str.lower().eq("user")
-        rows = df.loc[mask, MSG_COL]
-    else:
-        rows = df[MSG_COL]
-    return [str(m).strip() for m in rows.dropna() if str(m).strip()]

@@ -8,9 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from seezar_operator.chat_data import (  # noqa: E402
-    customer_messages, load_export, messages_per_chat,
-)
+from seezar_operator.chat_data import load_export, messages_per_chat  # noqa: E402
 
 CRLF = chr(13) + chr(10)
 
@@ -48,12 +46,6 @@ def test_messages_per_chat(export_zip):
     assert stats["total_rows"] == 5
     assert stats["unique_chat_refs"] == 2
     assert stats["messages_per_chat"] == 2.5
-
-
-def test_customer_messages_excludes_bot_replies(export_zip):
-    msgs = customer_messages(load_export(export_zip))
-    assert len(msgs) == 3
-    assert all("Here are some options" not in m for m in msgs)
 
 
 def test_missing_column_is_rejected(tmp_path):
