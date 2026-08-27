@@ -65,9 +65,7 @@ A Streamlit interface exposes the same operations:
 streamlit run app.py
 ```
 
-Streamlit reloads `app.py` on each interaction but not the imported `seezar_operator`
-modules, which are held in `sys.modules` for the life of the process. Restart the
-server after editing anything outside `app.py`.
+Streamlit reloads `app.py` on each interaction but not the imported `seezar_operator` modules, which are held in `sys.modules` for the life of the process. Restart the server after editing anything outside `app.py`.
 
 ## Architecture
 
@@ -94,11 +92,11 @@ The dashboard renders its analytics charts to `<canvas>`, so the underlying valu
 
 ### Identifier resolution
 
-Dealership identifiers, bot identifiers and the dealership list are resolved at runtime from the `getDealerships` query, which returns 316 dealerships with an active bot. Dealership names supplied on the command line are matched case-insensitively, with ambiguous matches rejected.
+Dealership identifiers, bot identifiers and the dealership list are resolved at runtime from the `getDealerships` query. Dealership names supplied on the command line are matched case-insensitively, with ambiguous matches rejected.
 
 ### Bot selection
 
-A dealership may host multiple bots. Ejner Hessel has an internal support assistant (`527`) and a customer-facing bot (`526`), whose Conversations tabs contain 24 and 101 chats respectively. The operator reads each bot's `botType` from `queryDealershipById` and selects the customer-facing one. Analytics is served only for `527`, and `/analytics/526` redirects to it, so each report records the bot its figures describe.
+A dealership may host several bots, such as an internal support assistant alongside a customer-facing one. The operator reads each bot's `botType` from `queryDealershipById` and selects the customer-facing bot. Analytics may be served for a different bot and redirect to it, so each report records the bot its figures describe.
 
 ### Metric derivation
 
@@ -108,68 +106,35 @@ The language model assigns a topic label to each message and extracts any vehicl
 
 The operator downloads the Chat History archive, parses the CSV files it contains, and divides the total row count by the number of distinct `Chat Ref` values.
 
-Result for Ejner Hessel:
+Three properties of the archive affect parsing, all covered by `tests/test_chat_data.py`:
 
-```
-Total message rows   901
-Unique Chat Refs     116
-Messages per chat    7.77
-```
-
-The archive has three properties that affect parsing, covered by `tests/test_chat_data.py`:
-
-- It is UTF-8 with a byte-order mark, which corrupts the first column name unless read as `utf-8-sig`.
-- Message text contains embedded newlines. The Ejner Hessel file has 2,719 physical lines and 901 rows; counting lines yields approximately 23 messages per chat against a true 7.77.
-- A dealership group ships one file per franchise. The Norton Way archive contains `Norton Way.csv`, `Norton Way Peugeot.csv` and `Norton Way Citroen.csv`, totalling 1,040 rows across 178 chats.
+- It is UTF-8 with a byte-order mark, so it must be read as `utf-8-sig` or the first column name is corrupted.
+- Message text contains embedded newlines, so the file has more physical lines than data rows. Row counts come from a CSV parse rather than a line count.
+- A dealership group ships one file per franchise. Every CSV in the archive is read, not just the first.
 
 The archive covers a dealership's full history, whereas the dashboard's own messages-per-chat figure is scoped to the selected date range. The two are reported separately.
 
 ## Scenario III: deep-dive explorer
 
-The operator reads the analytics vehicle figures, then opens the Conversations tab and reads each chat. Every conversation figure below comes from that tab; the Chat History export belongs to Scenario II and is not used here.
+The operator reads the analytics vehicle figures, then opens the Conversations tab and reads each chat. Every conversation figure comes from that tab; the Chat History archive belongs to Scenario II and is not used here.
 
-The list renders 20 rows per page while the underlying query returns every chat, so the operator pages through the list to reach chats beyond the first page.
+The chat list renders 20 rows per page while the underlying query returns every chat, so the operator pages through the list to reach chats beyond the first page. `--max-chats` bounds how many are read, and the number listed against the number read is stated in the report.
 
-Mentions of the most-clicked model:
+The report covers how many of the chats read mention the most-clicked model, which models customers named, and the topic distribution over all messages read and over the subset naming a vehicle. Inconsistencies between the analytics payload and the conversation data are reported rather than reconciled.
 
-| Measure | Value |
-| --- | --- |
-| Chats listed in the Conversations tab | 101 |
-| Chats opened and read | 25 |
-| Customer messages in those chats | 70 |
-| Chats mentioning `Toyota Camry` | 0 |
-
-Vehicle interest by source:
-
-| Source | Result |
-| --- | --- |
-| Analytics `vehicleInsights` | Toyota Camry 60, Nissan Sunny 30 |
-| Analytics `mostQueried` | Chevrolet Captiva |
-| Customer conversations | Mercedes, Porsche, Ford Mondeo, Xpeng G9, Audi |
-
-Two inconsistencies in the source data are reported rather than reconciled:
-
-1. `mostQueried` returns Chevrolet Captiva, while `vehicleInsights` in the same payload ranks Toyota Camry highest at 60 clicks. Chevrolet Captiva does not appear in `vehicleInsights`.
-2. No vehicle named in the analytics payload appears in any customer message, so the two sources are presented independently.
-
-Topic distribution is reported over all sampled messages and over the subset that names a vehicle.
-
-Classification is performed by a language model because the conversations mix Danish and English: `"Kan jeg bytte min gamle bil ind?"` is a trade-in enquiry, and `"Hvad koster den om maneden med udbetaling?"` concerns financing rather than pricing. Neither is reachable by English keyword matching.
+Classification uses a language model because the conversations mix Danish and English: `"Kan jeg bytte min gamle bil ind?"` is a trade-in enquiry, and `"Hvad koster den om maneden med udbetaling?"` concerns financing rather than pricing. Neither is reachable by English keyword matching.
 
 The brief describes clicking the most-clicked model. That element is an `H2` heading with `cursor: auto` and no click handler, so the value is read from the analytics payload instead.
 
 ## Evaluation
 
-`eval/gold_labels.json` contains 60 messages drawn from the live export and annotated by hand. `python evaluate.py --save` classifies them and reports accuracy, macro F1, per-class precision and recall, and every disagreement.
+`eval/gold_labels.json` contains messages drawn from the live export and annotated by hand.
 
-| Taxonomy | Accuracy | Macro F1 |
-| --- | --- | --- |
-| Initial | 71.7% (43/60) | 0.792 |
-| With `parts_merchandise` | 95.0% (57/60) | 0.855 |
+```bash
+python evaluate.py --save
+```
 
-Under the initial taxonomy, `inventory` scored 1.00 precision and 0.46 recall: the model did not classify accessories and branded goods as vehicle inventory. Thirteen of seventeen errors were that distinction. Adding a `parts_merchandise` label resolved it; the class now scores 1.00 precision and recall over 17 messages. Accessories and merchandise account for a substantial share of this dealership's traffic, and roughly one message in five requests a human agent.
-
-These figures measure agreement between the model and a single annotator. On 60 examples the 95% confidence interval around 95% is approximately 86-99%. Macro F1 is averaged only over classes present in the annotated set; `financing` (support 1) and `specs` (support 2) are too small to yield a stable per-class score.
+Classifies the annotated set and reports accuracy, macro F1, per-class precision and recall, and every disagreement between the annotation and the model. Macro F1 is averaged only over classes present in the annotated set. The figures measure agreement with a single annotator rather than objective truth, and the set is small enough that per-class scores for rare labels are unstable.
 
 ## Testing
 
@@ -177,7 +142,7 @@ These figures measure agreement between the model and a single annotator. On 60 
 python -m pytest tests/ -q
 ```
 
-42 tests. The suite requires no browser, network access or credentials, and runs in CI on every push.
+The suite requires no browser, network access or credentials, and runs in CI on every push.
 
 ## Reproducibility
 
