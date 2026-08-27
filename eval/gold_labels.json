@@ -1,0 +1,242 @@
+[
+  {
+    "message": "copenhagen",
+    "label": "location"
+  },
+  {
+    "message": "book me a test drive for the red a class",
+    "label": "test_drive"
+  },
+  {
+    "message": "https://seezar-dashboard.seez.dev/dealership/2/customization/526",
+    "label": "other"
+  },
+  {
+    "message": "how can i get in touch with a human",
+    "label": "human_handoff"
+  },
+  {
+    "message": "What is TRP?",
+    "label": "other"
+  },
+  {
+    "message": "cool. My gps is not wokring. DO you have gps availabel for merceds?",
+    "label": "inventory"
+  },
+  {
+    "message": "Where is your nearest branch located?",
+    "label": "location"
+  },
+  {
+    "message": "do you have  key cover",
+    "label": "inventory"
+  },
+  {
+    "message": "suv",
+    "label": "inventory"
+  },
+  {
+    "message": "cool. do you have something in renault",
+    "label": "inventory"
+  },
+  {
+    "message": "I want to make a general inquiry",
+    "label": "other"
+  },
+  {
+    "message": "I would like to speak with one of your team members",
+    "label": "human_handoff"
+  },
+  {
+    "message": "Can i see some mercedes branded tshirt",
+    "label": "inventory"
+  },
+  {
+    "message": "Do provide servicing for my car",
+    "label": "service"
+  },
+  {
+    "message": "where are your showrooms located?",
+    "label": "location"
+  },
+  {
+    "message": "Aalborg",
+    "label": "location"
+  },
+  {
+    "message": "do you provide delivery for this?",
+    "label": "other"
+  },
+  {
+    "message": "vejle",
+    "label": "location"
+  },
+  {
+    "message": "What is Returbiler?",
+    "label": "other"
+  },
+  {
+    "message": "Jeg vil gerne læse mere om bugsering. Har I en intern eller offentlig artikel om det? Del den gerne.",
+    "label": "other"
+  },
+  {
+    "message": "book me a test drive for the renault captur, xpend and merc",
+    "label": "test_drive"
+  },
+  {
+    "message": "Do you have portable charger",
+    "label": "inventory"
+  },
+  {
+    "message": "do ypu sell cup holder mer mercedes",
+    "label": "inventory"
+  },
+  {
+    "message": "Do you sell adapter cable?",
+    "label": "inventory"
+  },
+  {
+    "message": "Super. Så tager jeg til Vejle for at få serviceret min Ford Mondeo.",
+    "label": "service"
+  },
+  {
+    "message": "Zurich",
+    "label": "location"
+  },
+  {
+    "message": "Do you sell key cover for mwercedes",
+    "label": "inventory"
+  },
+  {
+    "message": "Find en helpcenter-artikel, der forklarer forskellen på biltyper som SUV, hatchback og stationcar.",
+    "label": "specs"
+  },
+  {
+    "message": "Great. Then I'm going to Vejle to have my Ford Mondeo serviced.",
+    "label": "service"
+  },
+  {
+    "message": "I want key cover",
+    "label": "inventory"
+  },
+  {
+    "message": "Do you sell tires?",
+    "label": "inventory"
+  },
+  {
+    "message": "do you sell mat for mercedses",
+    "label": "inventory"
+  },
+  {
+    "message": "what is the weight of the first car",
+    "label": "specs"
+  },
+  {
+    "message": "do you have any brochures I could read",
+    "label": "other"
+  },
+  {
+    "message": "I would like to talk to someone",
+    "label": "human_handoff"
+  },
+  {
+    "message": "do you have tires",
+    "label": "inventory"
+  },
+  {
+    "message": "you have mercedes tshirt",
+    "label": "inventory"
+  },
+  {
+    "message": "how do i contact you?",
+    "label": "human_handoff"
+  },
+  {
+    "message": "can i buy Mercedes Nøglering",
+    "label": "inventory"
+  },
+  {
+    "message": "show me some suv;s",
+    "label": "inventory"
+  },
+  {
+    "message": "also please for the black Xpeng g6",
+    "label": "inventory"
+  },
+  {
+    "message": "Har I en artikel om anhængertræk og bugsering, som jeg kan læse? Send linket.",
+    "label": "other"
+  },
+  {
+    "message": "you have merceds branded tshirt",
+    "label": "inventory"
+  },
+  {
+    "message": "do you have any suv's ?",
+    "label": "inventory"
+  },
+  {
+    "message": "book me a test drive for the GLS",
+    "label": "test_drive"
+  },
+  {
+    "message": "do you have branded toys",
+    "label": "inventory"
+  },
+  {
+    "message": "i;m looking for key chain",
+    "label": "inventory"
+  },
+  {
+    "message": "“Hvad er procedure for garanti/reparation af Mercedes biler?”",
+    "label": "service"
+  },
+  {
+    "message": "I want to book a test drive for mercedes",
+    "label": "test_drive"
+  },
+  {
+    "message": "Do you have a service department?",
+    "label": "service"
+  },
+  {
+    "message": "what are the financing options",
+    "label": "financing"
+  },
+  {
+    "message": "hii",
+    "label": "other"
+  },
+  {
+    "message": "Hvordan booker jeg tid på værkstedet?",
+    "label": "service"
+  },
+  {
+    "message": "copenhgen",
+    "label": "location"
+  },
+  {
+    "message": "tell me more about your offerings",
+    "label": "other"
+  },
+  {
+    "message": "show me some gasoline SUVs in the region of Albertslund",
+    "label": "inventory"
+  },
+  {
+    "message": "do you have any e class, no electric ones",
+    "label": "inventory"
+  },
+  {
+    "message": "Im looking for 185/65R15 92T",
+    "label": "inventory"
+  },
+  {
+    "message": "How many locations do you have?",
+    "label": "location"
+  },
+  {
+    "message": "I want to book a test drive for a Mercedes E-klasse",
+    "label": "test_drive"
+  }
+]

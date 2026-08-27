@@ -1,0 +1,43 @@
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+*.env
+
+# Authentication & Session Storage
+storage_state.json
+auth.json
+*.session
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+
+# Playwright & Browser Artifacts
+.playwright/
+test-results/
+playwright-report/
+
+# OS specific
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Customer data - the chat-history export contains real conversations
+downloads/
+
+# Generated output (reproducible by re-running the operator)
+reports/
+
+# Test artefacts
+.pytest_cache/
+
+# Editor/agent tooling, not part of the deliverable
+.agents/
