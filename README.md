@@ -153,6 +153,15 @@ service bookings. Adding `service`, `location` and `human_handoff` cut `other` t
 The standout business finding: **one message in five is a request to speak to a
 human**, which says more about bot performance than any click metric on the page.
 
+### A dealership can have more than one bot
+
+Ejner Hessel hosts an internal HR assistant (`527`) and the customer-facing Seezar
+bot (`526`). The Conversations tab lists **24** chats for the internal bot and
+**101** for the customer-facing one, so picking `bots[0]` analyses the wrong
+population entirely. The dashboard serves Analytics for `527` only and redirects
+`/analytics/526` to it, so the operator records which bot each figure came from
+rather than implying they describe the same one.
+
 ---
 
 ## Configuration
@@ -182,8 +191,33 @@ and labelled by hand.
 python evaluate.py --save
 ```
 
-Reports accuracy, macro F1, per-class precision/recall, and every disagreement
-between the hand label and the model.
+| | Accuracy | Macro F1 |
+| --- | --- | --- |
+| Original taxonomy | 71.7 % (43/60) | 0.792 |
+| With `parts_merchandise` | **95.0 % (57/60)** | **0.855** |
+
+The first run put `inventory` at precision 1.00 but recall 0.46: when the model said
+*inventory* it was always right, but it refused to file a Mercedes t-shirt, a key
+cover or a set of tyres under it. In a car dealership *inventory* means vehicles,
+and 13 of the 17 errors were that single distinction — the taxonomy was wrong, not
+the model. Adding `parts_merchandise` took accuracy to 95 %, and that class now
+scores 1.00 precision and recall over 17 messages.
+
+That is also a business finding: **a large share of this dealership's chat traffic is
+about parts and merchandise rather than cars.**
+
+The three remaining disagreements are genuinely ambiguous — *"What is TRP?"* and two
+Danish requests for articles about towing.
+
+### How to read those numbers
+
+They measure **agreement between the model and one annotator**, not objective truth.
+There was no second labeller and no adjudication. On 60 examples the 95 % confidence
+interval around 95 % is roughly 86–99 %, so the figure should not be read to one
+decimal place. Macro F1 averages only over classes present in the gold set; `pricing`
+was predicted once but never appears in it, so its F1 is undefined rather than zero.
+Classes such as `financing` (support 1) and `specs` (support 2) are too small to
+support a stable per-class score.
 
 ## Reproducibility
 

@@ -93,3 +93,44 @@ def test_dealerships_skips_entries_without_bots():
     d._bot_pref = {}
     d.page = None
     assert list(d.dealerships()) == ["Has Bot"]
+
+
+def test_bot_metrics_reports_the_bot_actually_served():
+    """Analytics redirects to a different bot; the caller must be told which."""
+    captured = [(
+        "botMetrics", {"botId": "527"},
+        {"botMetrics": {"chatInsights": {"noOfChats": 188}}},
+    )]
+    d = _dash({"Ejner Hessel": {"id": "2", "bots": ["527"]}}, captured)
+
+    class _Page:
+        url = "https://seezar-dashboard.seez.dev/dealership/2/analytics/527"
+
+        def goto(self, *a, **k):
+            pass
+
+        def wait_for_timeout(self, *a, **k):
+            pass
+
+    d.page = _Page()
+    metrics, served = d.bot_metrics("Ejner Hessel")
+    assert served == "527"
+    assert metrics["chatInsights"]["noOfChats"] == 188
+
+
+def test_bot_metrics_raises_with_the_page_url_when_nothing_captured(monkeypatch):
+    monkeypatch.setattr("seezar_operator.dashboard.CAPTURE_TIMEOUT_MS", 50)
+    d = _dash({"Ejner Hessel": {"id": "2", "bots": ["527"]}}, [])
+
+    class _Page:
+        url = "https://seezar-dashboard.seez.dev/login"
+
+        def goto(self, *a, **k):
+            pass
+
+        def wait_for_timeout(self, *a, **k):
+            pass
+
+    d.page = _Page()
+    with pytest.raises(RuntimeError, match="login"):
+        d.bot_metrics("Ejner Hessel")

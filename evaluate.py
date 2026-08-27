@@ -47,7 +47,11 @@ def score(gold: list, predicted: list) -> dict:
     for t, p in zip(truth, predicted):
         confusion[t][p] += 1
 
-    macro = (sum(v["f1"] for v in per_class.values()) / len(per_class)) if per_class else 0.0
+    # Average only over classes that appear in the gold set. A class the model
+    # predicted but that has no gold examples has an undefined F1; folding a
+    # zero in for it understates the score.
+    scored = [v["f1"] for v in per_class.values() if v["support"] > 0]
+    macro = (sum(scored) / len(scored)) if scored else 0.0
     return {"n": len(gold), "correct": correct, "accuracy": correct / len(gold),
             "macro_f1": macro, "per_class": per_class, "confusion": confusion,
             "truth": truth, "predicted": predicted}
@@ -75,8 +79,13 @@ def main() -> int:
         ["Macro F1", "%.3f" % res["macro_f1"]],
     ])
     report.table("Per class", ["Topic", "Support", "Precision", "Recall", "F1"],
-                 [[k, v["support"], "%.2f" % v["precision"], "%.2f" % v["recall"], "%.2f" % v["f1"]]
+                 [[k, v["support"], "%.2f" % v["precision"], "%.2f" % v["recall"],
+                   "%.2f" % v["f1"] if v["support"] else "n/a"]
                   for k, v in sorted(res["per_class"].items(), key=lambda kv: -kv[1]["support"])])
+    zero = [k for k, v in res["per_class"].items() if not v["support"]]
+    if zero:
+        report.note("Predicted but absent from the gold set, so excluded from macro F1: %s"
+                    % ", ".join(zero))
 
     misses = [(g["message"], t, p) for g, t, p in zip(gold, res["truth"], res["predicted"]) if t != p]
     if misses:

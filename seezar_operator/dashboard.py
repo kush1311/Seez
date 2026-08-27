@@ -244,17 +244,30 @@ class Dashboard:
             logger.info("  chat %s -> %d customer messages", ref, len(texts))
         return chats, len(nodes)
 
-    def bot_metrics(self, name: str) -> dict:
+    def bot_metrics(self, name: str) -> Tuple[dict, str]:
+        """Analytics payload plus the bot it actually describes.
+
+        The dashboard serves Analytics for one bot only and redirects to it, so
+        the bot asked for is not always the bot reported on. Whichever botMetrics
+        the page fetches is the truth; the caller is told which one it was."""
         dealer_id, bot_id = self.resolve(name)
         logger.info("Opening analytics for %s (dealership=%s bot=%s)", name, dealer_id, bot_id)
         self.page.goto(
             "%s/dealership/%s/analytics/%s" % (DASHBOARD_URL, dealer_id, bot_id),
             wait_until="domcontentloaded", timeout=NAV_TIMEOUT,
         )
-        data = self._wait_for("botMetrics", CAPTURE_TIMEOUT_MS, botId=bot_id)
-        if data is None or not data.get("botMetrics"):
-            raise RuntimeError("No botMetrics response captured for %s" % name)
-        return data["botMetrics"]
+        if self._wait_for("botMetrics", CAPTURE_TIMEOUT_MS) is None:
+            raise RuntimeError(
+                "No botMetrics response captured for %s. Page URL was %s"
+                % (name, self.page.url)
+            )
+        for op, variables, data in reversed(self._captured):
+            if op == "botMetrics" and data.get("botMetrics"):
+                served = str(variables.get("botId") or bot_id)
+                if served != bot_id:
+                    logger.info("Analytics is served for bot %s, not %s", served, bot_id)
+                return data["botMetrics"], served
+        raise RuntimeError("botMetrics captured but empty for %s" % name)
 
     def download_chat_history(self, name: str) -> Path:
         dealer_id, _ = self.resolve(name)
@@ -262,18 +275,25 @@ class Dashboard:
             "%s/dealership/%s" % (DASHBOARD_URL, dealer_id),
             wait_until="domcontentloaded", timeout=NAV_TIMEOUT,
         )
-        # The header renders late on a slow dashboard, so wait for the control itself
-        # rather than a fixed sleep. Prefer the button over its inner span.
+        # The dashboard's own test id, which survives copy changes and does not
+        # collide with the "Chat History" panel heading on the Conversations tab.
         trigger = self.page.locator(
-            "button:has-text('Chat History'), .downloadChats"
+            '[data-test-id="downloand-csv-button"], button.downloadChatsButton, '
+            "button:has-text('Chat History')"
         ).first
         trigger.wait_for(state="visible", timeout=CAPTURE_TIMEOUT_MS)
-        self.page.wait_for_timeout(1500)
 
         logger.info("Downloading chat history for %s", name)
         dl, last_err = None, None
         for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
             try:
+                # The button is disabled while an export is being generated, so a
+                # retry must wait for it rather than click into a disabled control.
+                deadline = time.monotonic() + DOWNLOAD_TIMEOUT_MS / 1000.0
+                while not trigger.is_enabled() and time.monotonic() < deadline:
+                    logger.info("Export still generating; waiting for the button")
+                    self.page.wait_for_timeout(3000)
+
                 with self.page.expect_download(timeout=DOWNLOAD_TIMEOUT_MS) as info:
                     trigger.click()
                 dl = info.value

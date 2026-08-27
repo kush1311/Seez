@@ -21,7 +21,7 @@
   },
   {
     "message": "cool. My gps is not wokring. DO you have gps availabel for merceds?",
-    "label": "inventory"
+    "label": "parts_merchandise"
   },
   {
     "message": "Where is your nearest branch located?",
@@ -29,7 +29,7 @@
   },
   {
     "message": "do you have  key cover",
-    "label": "inventory"
+    "label": "parts_merchandise"
   },
   {
     "message": "suv",
@@ -49,7 +49,7 @@
   },
   {
     "message": "Can i see some mercedes branded tshirt",
-    "label": "inventory"
+    "label": "parts_merchandise"
   },
   {
     "message": "Do provide servicing for my car",
@@ -85,15 +85,15 @@
   },
   {
     "message": "Do you have portable charger",
-    "label": "inventory"
+    "label": "parts_merchandise"
   },
   {
     "message": "do ypu sell cup holder mer mercedes",
-    "label": "inventory"
+    "label": "parts_merchandise"
   },
   {
     "message": "Do you sell adapter cable?",
-    "label": "inventory"
+    "label": "parts_merchandise"
   },
   {
     "message": "Super. Så tager jeg til Vejle for at få serviceret min Ford Mondeo.",
@@ -105,7 +105,7 @@
   },
   {
     "message": "Do you sell key cover for mwercedes",
-    "label": "inventory"
+    "label": "parts_merchandise"
   },
   {
     "message": "Find en helpcenter-artikel, der forklarer forskellen på biltyper som SUV, hatchback og stationcar.",
@@ -117,15 +117,15 @@
   },
   {
     "message": "I want key cover",
-    "label": "inventory"
+    "label": "parts_merchandise"
   },
   {
     "message": "Do you sell tires?",
-    "label": "inventory"
+    "label": "parts_merchandise"
   },
   {
     "message": "do you sell mat for mercedses",
-    "label": "inventory"
+    "label": "parts_merchandise"
   },
   {
     "message": "what is the weight of the first car",
@@ -141,11 +141,11 @@
   },
   {
     "message": "do you have tires",
-    "label": "inventory"
+    "label": "parts_merchandise"
   },
   {
     "message": "you have mercedes tshirt",
-    "label": "inventory"
+    "label": "parts_merchandise"
   },
   {
     "message": "how do i contact you?",
@@ -153,7 +153,7 @@
   },
   {
     "message": "can i buy Mercedes Nøglering",
-    "label": "inventory"
+    "label": "parts_merchandise"
   },
   {
     "message": "show me some suv;s",
@@ -169,7 +169,7 @@
   },
   {
     "message": "you have merceds branded tshirt",
-    "label": "inventory"
+    "label": "parts_merchandise"
   },
   {
     "message": "do you have any suv's ?",
@@ -181,11 +181,11 @@
   },
   {
     "message": "do you have branded toys",
-    "label": "inventory"
+    "label": "parts_merchandise"
   },
   {
     "message": "i;m looking for key chain",
-    "label": "inventory"
+    "label": "parts_merchandise"
   },
   {
     "message": "“Hvad er procedure for garanti/reparation af Mercedes biler?”",
@@ -229,7 +229,7 @@
   },
   {
     "message": "Im looking for 185/65R15 92T",
-    "label": "inventory"
+    "label": "parts_merchandise"
   },
   {
     "message": "How many locations do you have?",

@@ -49,7 +49,7 @@ def run(dealership: str, dash: Optional[Dashboard] = None,
     own = dash is None
     dash = dash or Dashboard().start().open()
     try:
-        metrics = dash.bot_metrics(dealership)
+        metrics, analytics_bot = dash.bot_metrics(dealership)
         chats, chats_listed = dash.conversations(dealership, max_chats=max_chats)
         zip_path = dash.download_chat_history(dealership)
     finally:
@@ -102,6 +102,7 @@ def run(dealership: str, dash: Optional[Dashboard] = None,
 
     result = {
         "dealership": dealership,
+        "analytics_bot": analytics_bot,
         "top_model": top_model,
         "analytics_most_queried": most_queried,
         "analytics_models": analytics_models,
@@ -155,6 +156,7 @@ def run(dealership: str, dash: Optional[Dashboard] = None,
     md = ["# Scenario III - Deep-Dive Explorer", "",
           "**Dealership:** %s  " % dealership,
           "**Most-clicked model (Analytics):** %s  " % top_model,
+          "**Analytics served for bot:** `%s`  " % analytics_bot,
           "**Messages analysed:** %d of %d, random sample (seed %d)  "
           % (len(sampled), len(msgs), SAMPLE_SEED),
           "**Topic model:** `%s` via OpenRouter" % llm.OPENROUTER_MODEL, "",

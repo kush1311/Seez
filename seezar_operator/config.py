@@ -30,7 +30,7 @@ NAV_TIMEOUT = 60_000
 SETTLE_MS = 11_000
 CAPTURE_TIMEOUT_MS = int(os.getenv("CAPTURE_TIMEOUT_MS", "75000"))
 CAPTURE_ATTEMPTS = int(os.getenv("CAPTURE_ATTEMPTS", "3"))
-DOWNLOAD_TIMEOUT_MS = int(os.getenv("DOWNLOAD_TIMEOUT_MS", "180000"))
+DOWNLOAD_TIMEOUT_MS = int(os.getenv("DOWNLOAD_TIMEOUT_MS", "300000"))
 DOWNLOAD_ATTEMPTS = int(os.getenv("DOWNLOAD_ATTEMPTS", "2"))
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
@@ -39,5 +39,5 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 TOPICS = [
     "pricing", "inventory", "financing", "specs", "test_drive", "trade_in",
-    "service", "location", "human_handoff", "other",
+    "service", "location", "human_handoff", "parts_merchandise", "other",
 ]
