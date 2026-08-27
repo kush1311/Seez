@@ -32,6 +32,8 @@ the UI call exactly the same functions — the UI adds no logic of its own.
 
 ```
 main.py                      CLI
+app.py                       Streamlit UI
+evaluate.py                  scores the classifier against hand labels
 seezar_operator/
   config.py                  env-driven settings; no hardcoded IDs
   dashboard.py               Playwright navigation + GraphQL interception
@@ -42,7 +44,8 @@ seezar_operator/
     scenario_2.py            messages per chat
     scenario_3.py            deep-dive explorer
   utils/otp_fetcher.py       Gmail IMAP one-time-code reader
-tests/                       parser and OTP-regex tests
+eval/gold_labels.json        60 hand-labelled messages
+tests/                       27 tests
 ```
 
 Three decisions worth explaining on a call:
@@ -57,6 +60,12 @@ Faithful to the brief, and exact instead of approximate.
 discovered at runtime from the `getDealerships` query — 316 dealerships with active
 bots at the time of writing. `--dealership` is matched case-insensitively against the
 live sidebar, so the operator works for any dealership without a code change.
+
+**The right bot is chosen, not the first one.** Ejner Hessel hosts two bots: `527`
+is an internal HR assistant (one of its conversations asks *"Hvordan registrerer jeg
+sygdom?"* — how do I report sick leave) and `526` is the customer-facing Seezar bot.
+Taking `bots[0]` analyses the HR bot. The operator reads each bot's `botType` from
+`queryDealershipById` and prefers `seezar`.
 
 **The LLM never produces a number.** It assigns a topic label and extracts vehicle
 names from raw message text. Every count, percentage and ratio in every report is
@@ -162,6 +171,25 @@ OPENROUTER_MODEL=deepseek/deepseek-v4-flash-0731
 The session is cached in `downloads/storage_state.json`; login with OTP runs only
 when it expires. Topic batches are sent concurrently, with retry on transient
 failures and salvage-parsing for truncated JSON responses.
+
+## Evaluating the classifier
+
+Scenario III's topic labels come from a model, so their accuracy is measured rather
+than assumed. `eval/gold_labels.json` holds 60 messages sampled from the live export
+and labelled by hand.
+
+```bash
+python evaluate.py --save
+```
+
+Reports accuracy, macro F1, per-class precision/recall, and every disagreement
+between the hand label and the model.
+
+## Reproducibility
+
+Dependencies are pinned exactly (`requirements.txt`); tested on Python 3.13.
+The Scenario III sample is drawn with a fixed seed, and the model runs at
+`temperature: 0`, so repeat runs produce the same figures.
 
 ```bash
 python -m pytest tests/ -q

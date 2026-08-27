@@ -40,6 +40,8 @@ def main() -> int:
     ap.add_argument("--headless", action="store_true", help="Run without a visible browser window")
     ap.add_argument("--max-messages", type=int, default=scenario_3.MAX_MESSAGES,
                     help="Cap on customer messages sent to the LLM in scenario 3")
+    ap.add_argument("--max-chats", type=int, default=scenario_3.MAX_CHATS,
+                    help="Cap on chats opened in the Conversations tab in scenario 3")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -60,7 +62,8 @@ def main() -> int:
         if args.scenario in ("2", "all"):
             scenario_2.run(args.dealership, dash=dash)
         if args.scenario in ("3", "all"):
-            scenario_3.run(args.dealership, dash=dash, max_messages=args.max_messages)
+            scenario_3.run(args.dealership, dash=dash, max_messages=args.max_messages,
+                           max_chats=args.max_chats)
         return 0
 
     except Exception as exc:

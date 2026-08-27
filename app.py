@@ -102,6 +102,7 @@ scenario = st.sidebar.radio("Scenario", ["II - Messages per chat",
                                          "III - Deep-dive explorer",
                                          "Both"], index=0)
 max_messages = st.sidebar.slider("Messages to classify (Scenario III)", 25, 450, 200, step=25)
+max_chats = st.sidebar.slider("Chats to open in Conversations tab", 5, 50, 25, step=5)
 show_browser = st.sidebar.checkbox("Show the browser while it runs", value=False,
                                    help="Watch the operator navigate; useful for a live demo")
 st.sidebar.caption("Model: `%s`" % OPENROUTER_MODEL)
@@ -192,7 +193,8 @@ if st.button("Run operator", type="primary"):
                 if run_2:
                     out["s2"] = scenario_2.run(dealership, dash=dash)
                 if run_3:
-                    out["s3"] = scenario_3.run(dealership, dash=dash, max_messages=max_messages)
+                    out["s3"] = scenario_3.run(dealership, dash=dash, max_messages=max_messages,
+                                               max_chats=max_chats)
                 return out
             finally:
                 dash.close()

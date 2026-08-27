@@ -207,7 +207,7 @@ class Dashboard:
         self._bot_pref[dealer_id] = chosen
         return chosen
 
-    def conversations(self, name: str, max_chats: int = 25) -> List[dict]:
+    def conversations(self, name: str, max_chats: int = 25) -> Tuple[List[dict], int]:
         """Open the Conversations tab and read each chat, as an operator would."""
         dealer_id, bot_id = self.resolve(name)
         logger.info("Opening Conversations tab for %s (bot=%s)", name, bot_id)
@@ -218,6 +218,8 @@ class Dashboard:
         listing = self._wait_for("seezarChats", CAPTURE_TIMEOUT_MS, botId=bot_id)
         nodes = ((listing or {}).get("seezarChats") or {}).get("nodes") or []
         logger.info("Conversations tab lists %d chats", len(nodes))
+        if len(nodes) > max_chats:
+            logger.warning("Reading the first %d of %d chats (--max-chats)", max_chats, len(nodes))
 
         chats: List[dict] = []
         for node in nodes[:max_chats]:
@@ -240,7 +242,7 @@ class Dashboard:
                     texts.append(str(payload["text"]).strip())
             chats.append({"chat_ref": ref, "user_messages": texts})
             logger.info("  chat %s -> %d customer messages", ref, len(texts))
-        return chats
+        return chats, len(nodes)
 
     def bot_metrics(self, name: str) -> dict:
         dealer_id, bot_id = self.resolve(name)

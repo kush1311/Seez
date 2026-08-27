@@ -31,13 +31,16 @@ def _top_model(most_queried, analytics_models) -> Optional[str]:
 
 
 def _mentions(model: str, texts: List[str]) -> int:
-    """Count texts naming the model. Matches the full name or any distinctive
-    word in it, so "Camry" counts towards "Toyota Camry"."""
+    """Count texts naming the model - the full name, or the model word alone so
+    "Camry" counts for "Toyota Camry". The make alone ("Toyota") does not: that
+    is interest in the brand, not in this model."""
     if not model:
         return 0
-    parts = [p for p in re.split(r"\s+", model) if len(p) > 2]
-    patterns = [re.escape(model)] + [re.escape(p) for p in parts]
-    rx = re.compile("|".join(patterns), re.IGNORECASE)
+    tokens = [t for t in re.split(r"\s+", model.strip()) if t]
+    patterns = [re.escape(model)]
+    if len(tokens) > 1:
+        patterns += [re.escape(t) for t in tokens[1:] if len(t) > 2]
+    rx = re.compile(r"\b(?:%s)\b" % "|".join(patterns), re.IGNORECASE)
     return sum(1 for t in texts if rx.search(t))
 
 
@@ -47,7 +50,7 @@ def run(dealership: str, dash: Optional[Dashboard] = None,
     dash = dash or Dashboard().start().open()
     try:
         metrics = dash.bot_metrics(dealership)
-        chats = dash.conversations(dealership, max_chats=max_chats)
+        chats, chats_listed = dash.conversations(dealership, max_chats=max_chats)
         zip_path = dash.download_chat_history(dealership)
     finally:
         if own:
@@ -102,6 +105,7 @@ def run(dealership: str, dash: Optional[Dashboard] = None,
         "top_model": top_model,
         "analytics_most_queried": most_queried,
         "analytics_models": analytics_models,
+        "chats_listed": chats_listed,
         "chats_reviewed": len(chats),
         "chats_mentioning_top_model": len(chats_with_model),
         "export_mentions_top_model": _mentions(top_model, msgs),
@@ -124,7 +128,8 @@ def run(dealership: str, dash: Optional[Dashboard] = None,
         "Conversations tab - users mentioning %r" % top_model,
         ["Measure", "Value"],
         [
-            ["Chats reviewed in Conversations tab", len(chats)],
+            ["Chats listed in Conversations tab", chats_listed],
+            ["Chats actually opened and read", len(chats)],
             ["Chats mentioning this model", len(chats_with_model)],
             ["Mentions across the full export (%d messages)" % len(msgs),
              result["export_mentions_top_model"]],
@@ -156,7 +161,8 @@ def run(dealership: str, dash: Optional[Dashboard] = None,
           "## How many users mentioned this model", "",
           report.md_table(
               ["Measure", "Value"],
-              [["Chats opened in the Conversations tab", len(chats)],
+              [["Chats listed in the Conversations tab", chats_listed],
+               ["Chats opened and read", len(chats)],
                ["Chats mentioning `%s`" % top_model, len(chats_with_model)],
                ["Mentions across the full export (%d messages)" % len(msgs),
                 result["export_mentions_top_model"]]],
