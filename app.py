@@ -176,12 +176,14 @@ def offer_report(stem: str, label: str) -> None:
 
 st.title("Seezar Autonomous Operator")
 st.caption(
-    "Navigates the live dashboard, captures the analytics payload off the wire, "
-    "and analyses the real chat-history export. Every figure is computed in code - "
-    "the model only labels text."
+    "Navigates the live dashboard and captures the analytics payload off the wire. "
+    "Scenario II parses the Chat History archive; Scenario III reads the Conversations "
+    "tab. All counts are computed in code - the model only labels text."
 )
 
 if st.button("Run operator", type="primary"):
+    st.session_state.pop("results", None)
+    st.session_state.pop("error", None)
     run_2 = scenario in ("II - Messages per chat", "Both")
     run_3 = scenario in ("III - Deep-dive explorer", "Both")
     try:
@@ -200,18 +202,25 @@ if st.button("Run operator", type="primary"):
                 dash.close()
 
         with st.status("Running against the live dashboard...", expanded=True):
-            results = _run_with_logs(lambda: _isolated(work))
-        st.success("Finished")
-
-        if "s2" in results:
-            show_scenario_2(results["s2"])
-            offer_report("scenario_2_messages_per_chat", "Download Scenario II report")
-        if "s3" in results:
-            st.divider()
-            show_scenario_3(results["s3"])
-            offer_report("scenario_3_deep_dive", "Download Scenario III report")
-
+            st.session_state["results"] = _run_with_logs(lambda: _isolated(work))
     except Exception as exc:
-        st.error("%s: %s" % (type(exc).__name__, exc))
-else:
+        st.session_state["error"] = "%s: %s" % (type(exc).__name__, exc)
+
+# Rendered outside the button block. Streamlit reruns the whole script on every
+# interaction, and the button reads False on a rerun - results held inside it
+# would disappear the moment a download button was clicked.
+if st.session_state.get("error"):
+    st.error(st.session_state["error"])
+
+results = st.session_state.get("results")
+if results:
+    st.success("Finished")
+    if "s2" in results:
+        show_scenario_2(results["s2"])
+        offer_report("scenario_2_messages_per_chat", "Download Scenario II report")
+    if "s3" in results:
+        st.divider()
+        show_scenario_3(results["s3"])
+        offer_report("scenario_3_deep_dive", "Download Scenario III report")
+elif not st.session_state.get("error"):
     st.info("Pick a dealership on the left, then run the operator.")
