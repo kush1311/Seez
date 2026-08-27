@@ -96,25 +96,28 @@ def test_dealerships_skips_entries_without_bots():
 
 
 def test_bot_metrics_reports_the_bot_actually_served():
-    """Analytics redirects to a different bot; the caller must be told which."""
-    captured = [(
-        "botMetrics", {"botId": "527"},
-        {"botMetrics": {"chatInsights": {"noOfChats": 188}}},
-    )]
-    d = _dash({"Ejner Hessel": {"id": "2", "bots": ["527"]}}, captured)
+    """Analytics redirects to a different bot; the caller must be told which.
+
+    Asked for 526, the page fetches 527 - the caller must get 527 back.
+    """
+    d = _dash({"Ejner Hessel": {"id": "2", "bots": ["526"]}}, [])
 
     class _Page:
         url = "https://seezar-dashboard.seez.dev/dealership/2/analytics/527"
 
         def goto(self, *a, **k):
-            pass
+            # The SPA fetches during navigation, which is what the guard requires
+            d._captured.append((
+                "botMetrics", {"botId": "527"},
+                {"botMetrics": {"chatInsights": {"noOfChats": 188}}},
+            ))
 
         def wait_for_timeout(self, *a, **k):
             pass
 
     d.page = _Page()
     metrics, served = d.bot_metrics("Ejner Hessel")
-    assert served == "527"
+    assert served == "527", "must report the bot the dashboard actually served"
     assert metrics["chatInsights"]["noOfChats"] == 188
 
 
@@ -134,3 +137,23 @@ def test_bot_metrics_raises_with_the_page_url_when_nothing_captured(monkeypatch)
     d.page = _Page()
     with pytest.raises(RuntimeError, match="login"):
         d.bot_metrics("Ejner Hessel")
+
+
+def test_bot_metrics_ignores_a_previous_dealerships_payload(monkeypatch):
+    """A stale payload must not be served under a new dealership's heading."""
+    monkeypatch.setattr("seezar_operator.dashboard.CAPTURE_TIMEOUT_MS", 50)
+    stale = ("botMetrics", {"botId": "111"}, {"botMetrics": {"chatInsights": {"noOfChats": 999}}})
+    d = _dash({"Other Dealer": {"id": "9", "bots": ["222"]}}, [stale])
+
+    class _Page:
+        url = "https://seezar-dashboard.seez.dev/dealership/9/analytics/222"
+
+        def goto(self, *a, **k):
+            pass
+
+        def wait_for_timeout(self, *a, **k):
+            pass
+
+    d.page = _Page()
+    with pytest.raises(RuntimeError, match="No botMetrics"):
+        d.bot_metrics("Other Dealer")

@@ -90,9 +90,6 @@ class Dashboard:
                 return None
             self.page.wait_for_timeout(400)
 
-    def _settle(self, ms: int = SETTLE_MS) -> None:
-        self.page.wait_for_timeout(ms)
-
     def open(self) -> "Dashboard":
         self.page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=NAV_TIMEOUT)
         # The SPA may redirect to /login well after domcontentloaded, so watch for
@@ -252,22 +249,30 @@ class Dashboard:
         the page fetches is the truth; the caller is told which one it was."""
         dealer_id, bot_id = self.resolve(name)
         logger.info("Opening analytics for %s (dealership=%s bot=%s)", name, dealer_id, bot_id)
+
+        # Only accept a payload fetched after this navigation. Matching on any
+        # botMetrics would hand back a previous dealership's figures if this
+        # page failed to load - wrong numbers under a correct-looking heading.
+        seen_before = len(self._captured)
         self.page.goto(
             "%s/dealership/%s/analytics/%s" % (DASHBOARD_URL, dealer_id, bot_id),
             wait_until="domcontentloaded", timeout=NAV_TIMEOUT,
         )
-        if self._wait_for("botMetrics", CAPTURE_TIMEOUT_MS) is None:
-            raise RuntimeError(
-                "No botMetrics response captured for %s. Page URL was %s"
-                % (name, self.page.url)
-            )
-        for op, variables, data in reversed(self._captured):
-            if op == "botMetrics" and data.get("botMetrics"):
-                served = str(variables.get("botId") or bot_id)
-                if served != bot_id:
-                    logger.info("Analytics is served for bot %s, not %s", served, bot_id)
-                return data["botMetrics"], served
-        raise RuntimeError("botMetrics captured but empty for %s" % name)
+
+        deadline = time.monotonic() + CAPTURE_TIMEOUT_MS / 1000.0
+        while True:
+            for op, variables, data in reversed(self._captured[seen_before:]):
+                if op == "botMetrics" and data.get("botMetrics"):
+                    served = str(variables.get("botId") or bot_id)
+                    if served != bot_id:
+                        logger.info("Analytics is served for bot %s, not %s", served, bot_id)
+                    return data["botMetrics"], served
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    "No botMetrics response captured for %s. Page URL was %s"
+                    % (name, self.page.url)
+                )
+            self.page.wait_for_timeout(400)
 
     def download_chat_history(self, name: str) -> Path:
         dealer_id, _ = self.resolve(name)
