@@ -19,6 +19,8 @@ from seezar_operator.config import (
 logger = logging.getLogger("seezar.dashboard")
 
 _OP_RE = re.compile(r"(?:query|mutation)\s+(\w+)")
+# An unauthenticated visitor is redirected to /signup, not /login.
+_AUTH_RE = re.compile(r"/(?:login|signup)")
 
 
 class Dashboard:
@@ -96,7 +98,7 @@ class Dashboard:
         # either outcome instead of sleeping a fixed interval and guessing.
         deadline = time.monotonic() + CAPTURE_TIMEOUT_MS / 1000.0
         while time.monotonic() < deadline:
-            if "/login" in self.page.url:
+            if _AUTH_RE.search(self.page.url):
                 self.login()
                 break
             if self._latest("getDealerships") is not None:
@@ -112,14 +114,31 @@ class Dashboard:
             raise RuntimeError("SEEZAR_EMAIL is not set in .env")
         logger.info("Session expired - performing login for %s", SEEZAR_EMAIL)
         self.page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=NAV_TIMEOUT)
-        self.page.wait_for_timeout(3000)
 
-        self.page.locator("input[type='email'], input[name='email']").first.fill(SEEZAR_EMAIL)
+        email_box = self.page.locator("input[type='email'], #email, input[name='email']").first
+        email_box.wait_for(state="visible", timeout=CAPTURE_TIMEOUT_MS)
+
+        # The page opens in sign-up mode, where the primary button reads
+        # "Create account". Switch to log-in before touching anything else.
+        toggle = self.page.get_by_text("Already have an account", exact=False)
+        if toggle.count():
+            toggle.first.click(timeout=15_000)
+            self.page.wait_for_timeout(2500)
+            logger.info("Switched the form from sign-up to log-in")
+
+        email_box.fill(SEEZAR_EMAIL)
         if SEEZAR_PASSWORD:
             pw_box = self.page.locator("input[type='password']")
             if pw_box.count():
                 pw_box.first.fill(SEEZAR_PASSWORD)
-        self.page.locator("button[type='submit']").first.click()
+
+        # Filling the email enables the primary button; clicking it while still
+        # disabled silently does nothing.
+        submit = self.page.locator("button.primary, button[class*='primary']").first
+        deadline = time.monotonic() + 30
+        while not submit.is_enabled() and time.monotonic() < deadline:
+            self.page.wait_for_timeout(500)
+        submit.click(timeout=15_000)
         self.page.wait_for_timeout(6000)
 
         otp_box = self.page.locator(
@@ -134,8 +153,8 @@ class Dashboard:
             self.page.locator("button[type='submit']").first.click()
             self.page.wait_for_timeout(8000)
 
-        if "/login" in self.page.url:
-            raise RuntimeError("Login failed - still on the login page")
+        if _AUTH_RE.search(self.page.url):
+            raise RuntimeError("Login failed - still on %s" % self.page.url)
         self._ctx.storage_state(path=str(STORAGE_STATE_PATH))
         logger.info("Login succeeded; session persisted")
 
