@@ -134,16 +134,32 @@ class Dashboard:
 
         # Filling the email enables the primary button; clicking it while still
         # disabled silently does nothing.
-        submit = self.page.locator("button.primary, button[class*='primary']").first
+        submit = self.page.locator(
+            "button.primary, button[class*='primary'], button[type='submit']"
+        ).first
+        submit.wait_for(state="visible", timeout=30_000)
         deadline = time.monotonic() + 30
-        while not submit.is_enabled() and time.monotonic() < deadline:
+        while time.monotonic() < deadline:
+            try:
+                if submit.is_enabled():
+                    break
+            except Exception:  # element re-rendering between checks
+                pass
             self.page.wait_for_timeout(500)
         submit.click(timeout=15_000)
-        self.page.wait_for_timeout(6000)
 
+        # The one-time-code field can take longer than a fixed sleep to render.
+        # Polling for it - or for the page leaving the auth screen - avoids
+        # silently skipping the whole OTP step and then failing on the URL check.
         otp_box = self.page.locator(
             "input[autocomplete='one-time-code'], input[name*='code' i], input[placeholder*='code' i]"
         )
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if otp_box.count() or not _AUTH_RE.search(self.page.url):
+                break
+            self.page.wait_for_timeout(500)
+
         if otp_box.count():
             code = get_otp_from_gmail(
                 sender_filter=OTP_SENDER_FILTER, timeout_seconds=OTP_TIMEOUT_SECONDS
