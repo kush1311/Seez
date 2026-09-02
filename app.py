@@ -23,6 +23,7 @@ for _stale in [n for n in sys.modules if n == "seezar_operator" or n.startswith(
 from seezar_operator.config import OPENROUTER_MODEL, REPORTS_DIR
 from seezar_operator.dashboard import Dashboard
 from seezar_operator.scenarios import scenario_2, scenario_3
+from seezar_operator.scenarios.scenario_3 import EVIDENCE_PER_TOPIC
 
 st.set_page_config(page_title="Seezar Autonomous Operator", page_icon=":material/smart_toy:", layout="wide")
 
@@ -103,8 +104,28 @@ except Exception as exc:
 
 names = sorted(dealers)
 default = names.index("Ejner Hessel") if "Ejner Hessel" in names else 0
-dealership = st.sidebar.selectbox("Dealership", names, index=default,
-                                  help="%d dealerships with an active bot" % len(names))
+DEALER_KEY = "dealership_choice"
+
+
+def parent_of(name: str):
+    """The unit that owns this one's Chat History export, if it is not itself a parent."""
+    parent_id = dealers.get(name, {}).get("parent")
+    if not parent_id:
+        return None
+    return next((n for n, v in dealers.items() if v["id"] == parent_id), None)
+
+
+def dealer_label(name: str) -> str:
+    # Franchises stay in the list - they are 75% of it and Scenario III works on
+    # them - but the marker says up front that Scenario II will not.
+    return name + ("  (franchise)" if parent_of(name) else "")
+
+
+dealership = st.sidebar.selectbox(
+    "Dealership", names, index=default, key=DEALER_KEY, format_func=dealer_label,
+    help="%d units with an active bot. Franchises support Scenario III; their "
+         "Chat History export lives on the parent." % len(names),
+)
 scenario = st.sidebar.radio("Scenario", ["II - Messages per chat",
                                          "III - Deep-dive explorer",
                                          "Both"], index=0)
@@ -115,7 +136,22 @@ show_browser = st.sidebar.checkbox("Show the browser while it runs", value=False
 st.sidebar.caption("Model: `%s`" % OPENROUTER_MODEL)
 
 resolved = dealers[dealership]
-st.sidebar.caption("dealership id `%s` - bot `%s`" % (resolved["id"], resolved["bots"][0]))
+st.sidebar.caption("%s - id `%s` - bot `%s`"
+                   % (resolved.get("unit") or "unit", resolved["id"], resolved["bots"][0]))
+
+parent_name = parent_of(dealership)
+if parent_name:
+    st.sidebar.warning(
+        "**Scenario II is not available here.** %s is a %s; the dashboard offers the "
+        "Chat History export only on its parent, **%s**, whose archive already "
+        "contains this unit's CSV. Scenario III works normally."
+        % (dealership, resolved.get("unit") or "franchise", parent_name)
+    )
+
+    def _switch_to_parent() -> None:
+        st.session_state[DEALER_KEY] = parent_name
+
+    st.sidebar.button("Switch to %s" % parent_name, on_click=_switch_to_parent)
 
 
 def show_scenario_2(stats: dict) -> None:
@@ -152,10 +188,19 @@ def show_scenario_3(res: dict) -> None:
                      hide_index=True, use_container_width=True)
     with right:
         st.markdown("**Models mentioned** (conversations)")
-        st.dataframe(
-            pd.DataFrame(list(res["model_counts"].items()), columns=["Model", "Mentions"]),
-            hide_index=True, use_container_width=True,
-        )
+        if res["model_counts"]:
+            st.dataframe(
+                pd.DataFrame(list(res["model_counts"].items()), columns=["Model", "Mentions"]),
+                hide_index=True, use_container_width=True,
+            )
+        else:
+            # An empty grid reads as a failure; the real result is "nobody named one".
+            st.info(
+                "No customer named a specific vehicle model in the %d messages read. "
+                "Enquiries here were general - used cars, fuel type, location - rather "
+                "than about a named model."
+                % res["messages_analysed"]
+            )
 
     if res["discrepancy"]:
         st.warning(res["discrepancy"])
@@ -171,6 +216,46 @@ def show_scenario_3(res: dict) -> None:
     chart, table = st.columns([2, 1])
     chart.bar_chart(topics.set_index("Topic")["Messages"], height=300)
     table.dataframe(topics, hide_index=True, use_container_width=True)
+
+    # Most chats are an assistant greeting nobody replied to. Saying so stops the
+    # message total looking like it contradicts the number of chats opened.
+    bot_only = res["chats_read"] - res.get("chats_with_messages", res["chats_read"])
+    if bot_only:
+        st.caption(
+            "%d of the %d chats read contained customer messages; %d held only bot "
+            "replies with no customer text." % (res.get("chats_with_messages", 0),
+                                                res["chats_read"], bot_only)
+        )
+
+    st.markdown("**Evidence - the messages behind these counts**")
+    evidence_rows = [
+        {"Topic": "%s (%d of %d shown)" % (topic, len(rows), res["topic_counts"][topic]),
+         "Chat": ref, "Customer message": msg}
+        for topic, rows in res.get("topic_evidence", {}).items()
+        for ref, msg in rows
+    ]
+    # State the sampling explicitly: "13 classified" next to 7 quotes otherwise
+    # looks like a mismatch rather than a deliberate cap.
+    st.caption(
+        "All %d messages were classified. This is a sample of up to %d per topic - "
+        "%d quoted below. The model assigns each label; the counts above are computed "
+        "in code from those labels, and every chat reference can be opened in the "
+        "dashboard's Conversations tab to check a figure."
+        % (res["messages_analysed"], EVIDENCE_PER_TOPIC, len(evidence_rows))
+    )
+    if evidence_rows:
+        st.dataframe(pd.DataFrame(evidence_rows), hide_index=True, use_container_width=True)
+    else:
+        st.info("No messages were classified, so there is nothing to quote.")
+
+    top_ev = res.get("top_model_evidence") or []
+    if top_ev:
+        st.markdown("**Customers who mentioned `%s`**" % res["top_model"])
+        st.dataframe(pd.DataFrame(top_ev, columns=["Chat", "Customer message"]),
+                     hide_index=True, use_container_width=True)
+    elif res.get("top_model"):
+        st.caption("No message in the %d chats read names `%s`."
+                   % (res["chats_read"], res["top_model"]))
 
 
 def offer_report(stem: str, label: str) -> None:
@@ -193,6 +278,19 @@ if st.button("Run operator", type="primary"):
     st.session_state.pop("error", None)
     run_2 = scenario in ("II - Messages per chat", "Both")
     run_3 = scenario in ("III - Deep-dive explorer", "Both")
+
+    # Skip Scenario II on a franchise rather than spending 20s discovering the
+    # export button is absent. "Both" still runs Scenario III, which works here.
+    if run_2 and parent_name:
+        run_2 = False
+        if not run_3:
+            st.session_state["error"] = (
+                "Scenario II needs the Chat History export, which %s does not have. "
+                "Run it on the parent, %s." % (dealership, parent_name)
+            )
+        else:
+            st.info("Skipping Scenario II - %s is a franchise. Running Scenario III only."
+                    % dealership)
     try:
         def work():
             dash = Dashboard(headless=not show_browser).start()

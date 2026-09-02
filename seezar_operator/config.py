@@ -30,8 +30,20 @@ NAV_TIMEOUT = 60_000
 SETTLE_MS = 11_000
 CAPTURE_TIMEOUT_MS = int(os.getenv("CAPTURE_TIMEOUT_MS", "75000"))
 CAPTURE_ATTEMPTS = int(os.getenv("CAPTURE_ATTEMPTS", "3"))
-DOWNLOAD_TIMEOUT_MS = int(os.getenv("DOWNLOAD_TIMEOUT_MS", "300000"))
-DOWNLOAD_ATTEMPTS = int(os.getenv("DOWNLOAD_ATTEMPTS", "2"))
+# Total budget for the whole export, not for a single click. Generation is
+# server-side and slow, and unrelated to size: Croxdale (27 chats) took 603s,
+# measured from the click to the button re-enabling. The budget has to outlast a
+# build or the archive can never be collected, so it is set above that.
+DOWNLOAD_TIMEOUT_MS = int(os.getenv("DOWNLOAD_TIMEOUT_MS", "900000"))
+DOWNLOAD_ATTEMPTS = int(os.getenv("DOWNLOAD_ATTEMPTS", "3"))
+# How long to wait for the file after a click before concluding that this click
+# started a build rather than served one. A warm archive arrives in 2-6s, so 20s is
+# generous. The long wait then happens on the button's disabled -> enabled cycle,
+# which is the dashboard's own progress signal, instead of on a blind download
+# timeout that reports nothing while it runs.
+DOWNLOAD_DIRECT_WAIT_MS = int(os.getenv("DOWNLOAD_DIRECT_WAIT_MS", "20000"))
+# The export button renders in ~2s when the unit has one at all.
+EXPORT_PROBE_MS = int(os.getenv("EXPORT_PROBE_MS", "20000"))
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash-0731").strip()

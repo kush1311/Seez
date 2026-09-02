@@ -5,6 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from seezar_operator import dashboard
 from seezar_operator.dashboard import Dashboard
 
 
@@ -157,3 +158,185 @@ def test_bot_metrics_ignores_a_previous_dealerships_payload(monkeypatch):
     d.page = _Page()
     with pytest.raises(RuntimeError, match="No botMetrics"):
         d.bot_metrics("Other Dealer")
+
+
+class _FlakyPage:
+    """A page whose goto() fails a set number of times before succeeding."""
+
+    def __init__(self, failures, message="net::ERR_NETWORK_CHANGED at https://x/"):
+        self.failures = failures
+        self.message = message
+        self.attempts = 0
+        self.slept = 0
+
+    def goto(self, url, **kwargs):
+        self.attempts += 1
+        if self.attempts <= self.failures:
+            raise RuntimeError(self.message)
+
+    def wait_for_timeout(self, ms):
+        self.slept += ms
+
+
+def _dash_with_page(page):
+    d = Dashboard.__new__(Dashboard)
+    d.page = page
+    return d
+
+
+def test_navigation_retries_a_transient_network_error():
+    page = _FlakyPage(failures=2)
+    _dash_with_page(page)._goto("https://example.test/")
+    assert page.attempts == 3, "should retry until it succeeds"
+
+
+def test_navigation_gives_up_with_a_clear_message():
+    page = _FlakyPage(failures=99)
+    with pytest.raises(RuntimeError, match="network kept dropping"):
+        _dash_with_page(page)._goto("https://example.test/")
+    assert page.attempts == 3, "bounded by NAV_ATTEMPTS"
+
+
+def test_a_real_error_is_not_retried():
+    """A 404 or a bad selector must surface immediately, not be masked as flakiness."""
+    page = _FlakyPage(failures=99, message="net::ERR_ABORTED - page not found")
+    with pytest.raises(RuntimeError, match="ERR_ABORTED"):
+        _dash_with_page(page)._goto("https://example.test/")
+    assert page.attempts == 1, "non-transient errors must fail on the first attempt"
+
+
+class _ExportButton:
+    """The export button as the dashboard drives it: enabled to start with, disabled
+    while a build runs after the click that starts one, then enabled again with the
+    archive ready and served by the next click."""
+
+    def __init__(self, clicks_that_build=1, finish_after_polls=3):
+        self.clicks = 0
+        self.clicks_that_build = clicks_that_build
+        self.finish_after_polls = finish_after_polls
+        self.building = False
+        self.polls = 0
+
+    def is_enabled(self):
+        if self.building:
+            self.polls += 1
+            if self.polls >= self.finish_after_polls:
+                self.building = False
+        return not self.building
+
+    def click(self, **kwargs):
+        self.clicks += 1
+        if self.clicks <= self.clicks_that_build:
+            self.building, self.polls = True, 0
+
+    def wait_for(self, **kwargs):
+        pass
+
+
+class _Downloaded:
+    suggested_filename = "chat-history.zip"
+
+    def save_as(self, path):
+        Path(path).write_text("archive")
+
+
+class _ExportPage:
+    """A page whose download only arrives from a click made while no build is running."""
+
+    def __init__(self, button):
+        self.button = button
+        self.windows = []
+        self.slept = 0
+
+    def goto(self, url, **kwargs):
+        pass
+
+    def locator(self, selector):
+        return self
+
+    @property
+    def first(self):
+        return self.button
+
+    def wait_for_timeout(self, ms):
+        self.slept += ms
+
+    def expect_download(self, timeout):
+        self.windows.append(timeout)
+        page = self
+
+        class _Expectation:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                if page.button.building:
+                    raise TimeoutError(
+                        "Timeout %dms exceeded while waiting for event \"download\"" % timeout
+                    )
+                return False
+
+            @property
+            def value(self):
+                return _Downloaded()
+
+        return _Expectation()
+
+
+def _export_dash(page):
+    d = Dashboard.__new__(Dashboard)
+    d.page = page
+    d._dealer_cache = {"Croxdale": {"id": "243", "bots": ["243"], "parent": None,
+                                    "unit": "dealership"}}
+    d._bot_pref = {}
+    return d
+
+
+def test_the_click_that_starts_a_build_is_not_waited_out_blindly(tmp_path, monkeypatch):
+    """The regression this exists for: a Croxdale run clicked, sat through a 420s
+    blind download timeout, then got the file 2s after the retry click. The long wait
+    belongs on the button - which the dashboard disables while it builds - not on a
+    download timeout that reports nothing while it runs."""
+    monkeypatch.setattr(dashboard, "DOWNLOADS_DIR", tmp_path)
+    button = _ExportButton(clicks_that_build=1)
+    page = _ExportPage(button)
+
+    saved = _export_dash(page).download_chat_history("Croxdale")
+
+    assert button.clicks == 2, "one click to build, one to fetch the built archive"
+    assert page.windows[0] == dashboard.DOWNLOAD_DIRECT_WAIT_MS, (
+        "the post-click wait must be the short one, not the whole budget"
+    )
+    assert page.windows[0] < dashboard.DOWNLOAD_TIMEOUT_MS
+    assert saved.read_text() == "archive"
+
+
+def test_an_archive_served_straight_away_costs_one_click(tmp_path, monkeypatch):
+    """A warm archive is served in 2-6s. That path must not be slowed down by the
+    retry logic added for the cold one."""
+    monkeypatch.setattr(dashboard, "DOWNLOADS_DIR", tmp_path)
+    button = _ExportButton(clicks_that_build=0)
+    page = _ExportPage(button)
+
+    _export_dash(page).download_chat_history("Croxdale")
+
+    assert button.clicks == 1
+    assert len(page.windows) == 1
+
+
+def test_wait_until_enabled_returns_as_soon_as_the_build_finishes():
+    button = _ExportButton(clicks_that_build=1)
+    button.click()
+    assert button.building is True
+    _export_dash(_ExportPage(button))._wait_until_enabled(button, "Croxdale", budget_s=30)
+    assert button.building is False, "returns only once the button reports it is done"
+
+
+def test_wait_until_enabled_respects_a_caller_budget():
+    """The loop hands it whatever is left of the overall budget, so an exhausted run
+    must not be held for the full default."""
+    button = _ExportButton(clicks_that_build=1, finish_after_polls=10**9)
+    button.click()
+    dash = _export_dash(_ExportPage(button))
+    with pytest.raises(RuntimeError, match="still disabled"):
+        dash._wait_until_enabled(button, "Croxdale", budget_s=0.05)

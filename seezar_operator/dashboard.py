@@ -12,7 +12,7 @@ from playwright.sync_api import sync_playwright
 from seezar_operator.config import (
     DASHBOARD_URL, LOGIN_URL, GRAPHQL_HOST, DOWNLOADS_DIR, STORAGE_STATE_PATH,
     HEADLESS, NAV_TIMEOUT, SETTLE_MS, CAPTURE_TIMEOUT_MS, CAPTURE_ATTEMPTS,
-    DOWNLOAD_TIMEOUT_MS, DOWNLOAD_ATTEMPTS,
+    DOWNLOAD_TIMEOUT_MS, DOWNLOAD_ATTEMPTS, DOWNLOAD_DIRECT_WAIT_MS, EXPORT_PROBE_MS,
     SEEZAR_EMAIL, SEEZAR_PASSWORD, OTP_SENDER_FILTER, OTP_TIMEOUT_SECONDS,
 )
 
@@ -20,7 +20,18 @@ logger = logging.getLogger("seezar.dashboard")
 
 _OP_RE = re.compile(r"(?:query|mutation)\s+(\w+)")
 # An unauthenticated visitor is redirected to /signup, not /login.
-_AUTH_RE = re.compile(r"/(?:login|signup)")
+_AUTH_RE = re.compile(r"/(?:login|signup)")
+
+# Chromium aborts with these when the machine's own connectivity changes underneath
+# a request - WiFi reconnecting, a VPN toggling, a dropped link. They say nothing
+# about the dashboard, so they are worth retrying; anything else is a real error.
+_TRANSIENT_NET = (
+    "ERR_NETWORK_CHANGED", "ERR_CONNECTION_RESET", "ERR_CONNECTION_CLOSED",
+    "ERR_CONNECTION_TIMED_OUT", "ERR_CONNECTION_ABORTED", "ERR_INTERNET_DISCONNECTED",
+    "ERR_NAME_NOT_RESOLVED", "ERR_PROXY_CONNECTION_FAILED", "ERR_EMPTY_RESPONSE",
+    "ERR_SOCKET_NOT_CONNECTED", "ERR_TIMED_OUT", "Timeout",
+)
+NAV_ATTEMPTS = 3
 
 
 class Dashboard:
@@ -30,6 +41,7 @@ class Dashboard:
         self._captured: List[Tuple[str, dict, dict]] = []
         self._dealer_cache: Optional[Dict[str, dict]] = None
         self._bot_pref: Dict[str, str] = {}
+        self._metrics_fp: Dict[str, str] = {}   # payload fingerprint -> bot that served it
 
     def __enter__(self) -> "Dashboard":
         self.start()
@@ -41,7 +53,11 @@ class Dashboard:
     def start(self) -> "Dashboard":
         self._pw = sync_playwright().start()
         self._browser = self._pw.chromium.launch(
-            headless=self.headless, slow_mo=0 if self.headless else 120
+            headless=self.headless,
+            slow_mo=0 if self.headless else 120,
+            # Chromium's default /dev/shm is small; a tab left idle for the minutes
+            # an export can take will otherwise sometimes crash outright.
+            args=["--disable-dev-shm-usage"],
         )
         ctx_kwargs: Dict[str, Any] = {
             "viewport": {"width": 1600, "height": 1000},
@@ -82,6 +98,34 @@ class Dashboard:
                 return data
         return None
 
+    def _goto(self, url: str) -> None:
+        """Navigate, retrying transient network failures.
+
+        A laptop reconnecting to WiFi, a VPN toggling, or a dropped connection makes
+        Chromium abort with net::ERR_NETWORK_CHANGED and similar. These are local and
+        momentary, and losing a run that may already be minutes in - or a live demo -
+        to one of them is not acceptable.
+        """
+        last_err = None
+        for attempt in range(1, NAV_ATTEMPTS + 1):
+            try:
+                self.page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT)
+                return
+            except Exception as exc:
+                message = str(exc)
+                if not any(marker in message for marker in _TRANSIENT_NET):
+                    raise                       # a real error: fail loudly, do not mask it
+                last_err = exc
+                logger.warning("Navigation to %s failed (%d/%d): %s",
+                               url, attempt, NAV_ATTEMPTS, message.splitlines()[0][:110])
+                if attempt < NAV_ATTEMPTS:
+                    self.page.wait_for_timeout(3000 * attempt)
+        raise RuntimeError(
+            "Could not load %s after %d attempts - the network kept dropping. "
+            "Check the connection and run again. Last error: %s"
+            % (url, NAV_ATTEMPTS, str(last_err).splitlines()[0][:160])
+        )
+
     def _wait_for(self, operation: str, timeout_ms: int = SETTLE_MS, **match_vars) -> Optional[dict]:
         deadline = time.monotonic() + timeout_ms / 1000.0
         while True:
@@ -93,7 +137,7 @@ class Dashboard:
             self.page.wait_for_timeout(400)
 
     def open(self) -> "Dashboard":
-        self.page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=NAV_TIMEOUT)
+        self._goto(DASHBOARD_URL)
         # The SPA may redirect to /login well after domcontentloaded, so watch for
         # either outcome instead of sleeping a fixed interval and guessing.
         deadline = time.monotonic() + CAPTURE_TIMEOUT_MS / 1000.0
@@ -113,7 +157,7 @@ class Dashboard:
         if not SEEZAR_EMAIL:
             raise RuntimeError("SEEZAR_EMAIL is not set in .env")
         logger.info("Session expired - performing login for %s", SEEZAR_EMAIL)
-        self.page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=NAV_TIMEOUT)
+        self._goto(LOGIN_URL)
 
         email_box = self.page.locator("input[type='email'], #email, input[name='email']").first
         email_box.wait_for(state="visible", timeout=CAPTURE_TIMEOUT_MS)
@@ -183,7 +227,7 @@ class Dashboard:
                 break
             logger.warning("Dealership list not captured; reloading (attempt %d/%d)",
                            attempt, CAPTURE_ATTEMPTS)
-            self.page.goto(DASHBOARD_URL, wait_until="domcontentloaded", timeout=NAV_TIMEOUT)
+            self._goto(DASHBOARD_URL)
             data = self._wait_for("getDealerships", CAPTURE_TIMEOUT_MS)
         if data is None:
             raise RuntimeError(
@@ -192,8 +236,15 @@ class Dashboard:
                 % (CAPTURE_ATTEMPTS, self.page.url,
                    sorted({op for op, _, _ in self._captured}) or "none")
             )
+        # parent/unit are carried so a franchise can explain, rather than just time
+        # out, when the dashboard offers no Chat History export on its own page.
         self._dealer_cache = {
-            d["name"]: {"id": d["id"], "bots": [b["id"] for b in (d.get("bots") or [])]}
+            d["name"]: {
+                "id": d["id"],
+                "bots": [b["id"] for b in (d.get("bots") or [])],
+                "parent": d.get("parentId"),
+                "unit": d.get("businessUnitType"),
+            }
             for d in data["dealerships"]
             if d.get("name") and d.get("bots")
         }
@@ -225,8 +276,7 @@ class Dashboard:
         # load when it genuinely has not been seen yet.
         data = self._latest("queryDealershipById", id=dealer_id)
         if data is None:
-            self.page.goto("%s/dealership/%s" % (DASHBOARD_URL, dealer_id),
-                           wait_until="domcontentloaded", timeout=NAV_TIMEOUT)
+            self._goto("%s/dealership/%s" % (DASHBOARD_URL, dealer_id))
             data = self._wait_for("queryDealershipById", CAPTURE_TIMEOUT_MS, id=dealer_id)
         chosen = bots[0]
         for bot in ((data or {}).get("dealership") or {}).get("bots") or []:
@@ -243,10 +293,7 @@ class Dashboard:
         """Open the Conversations tab and read each chat, as an operator would."""
         dealer_id, bot_id = self.resolve(name)
         logger.info("Opening Conversations tab for %s (bot=%s)", name, bot_id)
-        self.page.goto(
-            "%s/dealership/%s/chat-history/%s?page=1" % (DASHBOARD_URL, dealer_id, bot_id),
-            wait_until="domcontentloaded", timeout=NAV_TIMEOUT,
-        )
+        self._goto("%s/dealership/%s/chat-history/%s?page=1" % (DASHBOARD_URL, dealer_id, bot_id))
         listing = self._wait_for("seezarChats", CAPTURE_TIMEOUT_MS, botId=bot_id)
         nodes = ((listing or {}).get("seezarChats") or {}).get("nodes") or []
         logger.info("Conversations tab lists %d chats", len(nodes))
@@ -322,10 +369,7 @@ class Dashboard:
         # botMetrics would hand back a previous dealership's figures if this
         # page failed to load - wrong numbers under a correct-looking heading.
         seen_before = len(self._captured)
-        self.page.goto(
-            "%s/dealership/%s/analytics/%s" % (DASHBOARD_URL, dealer_id, bot_id),
-            wait_until="domcontentloaded", timeout=NAV_TIMEOUT,
-        )
+        self._goto("%s/dealership/%s/analytics/%s" % (DASHBOARD_URL, dealer_id, bot_id))
 
         deadline = time.monotonic() + CAPTURE_TIMEOUT_MS / 1000.0
         while True:
@@ -342,39 +386,121 @@ class Dashboard:
                 )
             self.page.wait_for_timeout(400)
 
+    def duplicate_metrics_bot(self, payload: dict, served_bot: str) -> Optional[str]:
+        """If an earlier bot in this session returned a byte-identical botMetrics
+        payload, return that bot's id. The analytics endpoint serves the same mock
+        data for every bot, so this lets a report prove it rather than assert it."""
+        fingerprint = json.dumps(payload, sort_keys=True)
+        previous = self._metrics_fp.get(fingerprint)
+        self._metrics_fp.setdefault(fingerprint, served_bot)
+        return previous if previous and previous != served_bot else None
+
+    def _wait_until_enabled(self, trigger, name: str,
+                            budget_s: Optional[float] = None) -> None:
+        """Wait for the export button to come back.
+
+        The dashboard disables it while it builds an archive and re-enables it when
+        the archive is ready, which makes that transition the only progress signal
+        the export has. Clicking while it is disabled just burns Playwright's
+        actionability timeout and reports "element is not enabled"; clicking once it
+        is enabled again serves the built file in seconds."""
+        if trigger.is_enabled():
+            return
+        budget = DOWNLOAD_TIMEOUT_MS / 1000.0 if budget_s is None else max(budget_s, 0.0)
+        logger.info("Export button is disabled - an archive for %s is already being "
+                    "generated; waiting up to %ds", name, int(budget))
+        started, announced = time.monotonic(), 0.0
+        while time.monotonic() - started < budget:
+            if trigger.is_enabled():
+                logger.info("Export button enabled again after %ds",
+                            int(time.monotonic() - started))
+                return
+            waited = time.monotonic() - started
+            if waited - announced >= 20:
+                announced = waited
+                logger.info("  still generating (%ds elapsed)", int(waited))
+            self.page.wait_for_timeout(2000)
+        raise RuntimeError(
+            "The Chat History button for %s was still disabled after %ds. The "
+            "dashboard is generating an archive and has not finished - wait a few "
+            "minutes and run again." % (name, int(budget))
+        )
+
+    def _no_export_reason(self, name: str) -> str:
+        """Explain a missing Chat History button. The dashboard only offers the
+        export on a parent business unit; a franchise's conversations are inside
+        the parent's archive, which is why a group export holds several CSVs."""
+        table = self.dealerships()
+        entry = table.get(name) or {}
+        parent_id = entry.get("parent")
+        unit = entry.get("unit") or "business unit"
+        if parent_id:
+            parent = next((n for n, v in table.items() if v["id"] == parent_id), None)
+            if parent:
+                return (
+                    "%s is a %s under %r, and the dashboard offers the Chat History "
+                    "export only on the parent. The parent's archive already contains "
+                    "this unit's CSV - run Scenario II on %r instead."
+                    % (name, unit, parent, parent)
+                )
+            return ("%s is a %s whose parent (id %s) is not in the dealership list, "
+                    "and only a parent offers the Chat History export."
+                    % (name, unit, parent_id))
+        return ("No Chat History export button is present for %s (%s). The dashboard "
+                "does not offer the export for this business unit." % (name, unit))
+
     def download_chat_history(self, name: str) -> Path:
         dealer_id, _ = self.resolve(name)
-        self.page.goto(
-            "%s/dealership/%s" % (DASHBOARD_URL, dealer_id),
-            wait_until="domcontentloaded", timeout=NAV_TIMEOUT,
-        )
+        self._goto("%s/dealership/%s" % (DASHBOARD_URL, dealer_id))
         # The dashboard's own test id, which survives copy changes and does not
         # collide with the "Chat History" panel heading on the Conversations tab.
         trigger = self.page.locator(
             '[data-test-id="downloand-csv-button"], button.downloadChatsButton, '
             "button:has-text('Chat History')"
         ).first
-        trigger.wait_for(state="visible", timeout=CAPTURE_TIMEOUT_MS)
+        # The button renders within a couple of seconds when it exists at all, so a
+        # short probe is enough; a longer one only delays a clear explanation.
+        try:
+            trigger.wait_for(state="visible", timeout=EXPORT_PROBE_MS)
+        except Exception:
+            raise RuntimeError(self._no_export_reason(name)) from None
 
-        logger.info("Downloading chat history for %s", name)
+        logger.info("Downloading chat history for %s - the server builds the archive "
+                    "on demand; the export button going disabled and back is how it "
+                    "reports progress, so that is what is watched, for up to %ds",
+                    name, DOWNLOAD_TIMEOUT_MS // 1000)
         dl, last_err = None, None
+        deadline = time.monotonic() + DOWNLOAD_TIMEOUT_MS / 1000.0
         for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                logger.warning("Out of time budget after %d attempt(s)", attempt - 1)
+                break
+            window = max(min(DOWNLOAD_DIRECT_WAIT_MS, int(remaining * 1000)), 1000)
             try:
-                # The button is disabled while an export is being generated, so a
-                # retry must wait for it rather than click into a disabled control.
-                deadline = time.monotonic() + DOWNLOAD_TIMEOUT_MS / 1000.0
-                while not trigger.is_enabled() and time.monotonic() < deadline:
-                    logger.info("Export still generating; waiting for the button")
-                    self.page.wait_for_timeout(3000)
-
-                with self.page.expect_download(timeout=DOWNLOAD_TIMEOUT_MS) as info:
-                    trigger.click()
+                # Never click a disabled button - that is the dashboard saying a build
+                # is running, and waiting for it to re-enable is waiting for the
+                # archive. This is also where a build started by a previous click, or
+                # by an earlier run, is sat out.
+                self._wait_until_enabled(trigger, name, budget_s=remaining)
+                if attempt > 1:
+                    logger.info("Export button is enabled again - clicking to fetch "
+                                "the archive (attempt %d/%d)", attempt, DOWNLOAD_ATTEMPTS)
+                # Short on purpose. A warm archive is served in 2-6s; anything longer
+                # means this click started a build rather than served one, and the
+                # useful thing to do then is watch the button, not keep waiting here.
+                with self.page.expect_download(timeout=window) as info:
+                    trigger.click(timeout=60_000)
                 dl = info.value
                 break
             except Exception as exc:
                 last_err = exc
-                logger.warning("Chat History download attempt %d/%d failed: %s",
-                               attempt, DOWNLOAD_ATTEMPTS, str(exc).splitlines()[0])
+                logger.info("No file %ds after click %d/%d - treating it as the click "
+                            "that started the build, and waiting for the button",
+                            window // 1000, attempt, DOWNLOAD_ATTEMPTS)
+                logger.debug("Download attempt %d failed: %s", attempt,
+                             str(exc).splitlines()[0])
+                self.page.wait_for_timeout(2000)
         if dl is None:
             raise RuntimeError(
                 "Chat History download did not start for %s after %d attempts (%s)"

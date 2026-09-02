@@ -20,14 +20,43 @@ MAX_RETRIES = 3
 MAX_TOKENS = 3000
 MAX_WORKERS = 3
 
+# Naming the labels without defining them leaves the boundaries to the model, and
+# dual-intent messages then land differently from run to run even at temperature 0.
+# Each definition below fixes one boundary that was observed to drift.
+TOPIC_DEFINITIONS = """\
+- pricing: the price or cost of a vehicle, discounts, or asking for the cheapest one
+- inventory: browsing or availability of vehicles - stock, body type, fuel type, make
+  or model. A bare vehicle category on its own ("hatchback") belongs here
+- financing: monthly payments, deposit, loan, leasing or insurance
+- specs: characteristics of a vehicle - dimensions, weight, range, equipment, or the
+  difference between vehicle types
+- test_drive: booking or asking about a test drive
+- trade_in: selling or part-exchanging the customer's own current vehicle
+- service: servicing, repairs, warranty, breakdown, towing, or booking the workshop
+- location: where a branch or showroom is, its opening hours, or a bare place name or
+  postcode offered as an answer ("Berlin", "2100")
+- human_handoff: asking to reach a person, the sales team, or contact details
+- parts_merchandise: accessories, spare parts or branded goods - chargers, cup
+  holders, key covers, clothing
+- other: greetings, thanks, acknowledgements, links, and meta or glossary questions
+  ("what does X mean?"), plus anything fitting none of the above"""
+
 SYSTEM_PROMPT = (
-    "You analyse customer messages sent to car-dealership chatbots. "
-    "Messages may be in Danish, English or German. "
-    "For each numbered message return: the single best topic from this list - "
-    + ", ".join(TOPICS)
-    + " - and any vehicle models explicitly mentioned (make and/or model, e.g. "
-    '"Toyota Camry", "Porsche"). Use an empty list when no model is named. '
-    'Reply with ONLY a compact JSON array of objects: '
+    "You label customer messages sent to car-dealership chatbots. Messages are often "
+    "short replies to something the bot asked, and may be in Danish, English or German.\n\n"
+    "Assign exactly one topic per message, using these definitions:\n"
+    + TOPIC_DEFINITIONS
+    + "\n\nMany messages are one or two words answering something the bot asked. Label "
+    "them by what they answer, never as other: a city, region or postcode on its own "
+    "is location, and a body type or fuel type on its own is inventory.\n\n"
+    "When a message fits more than one topic, choose the customer's primary intent - "
+    "what they want done. Judge a request for information or an article by its "
+    "subject, not by the fact that it is a request: an article about vehicle types is "
+    "specs, an article about breakdown recovery is service.\n\n"
+    "Also return any vehicle make or model the customer explicitly names, for example "
+    '"Toyota Camry" or "Porsche". Use an empty list when none is named; never infer '
+    "one from context.\n\n"
+    "Reply with ONLY a compact JSON array of objects: "
     '[{"i": <index>, "topic": "<topic>", "models": ["<model>"]}]. No prose, no markdown.'
 )
 
